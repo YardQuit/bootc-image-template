@@ -1,0 +1,16 @@
+---
+# Dependabot opens a pull request when a GitHub Action used in
+# .github/workflows/ has a newer version.
+#
+# Full reference:
+# https://docs.github.com/code-security/dependabot/dependabot-version-updates
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"          # workflows live in .github/workflows, "/" is correct
+    schedule:
+      interval: "weekly"
+    # Keeps the pull request list short.
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "ci"

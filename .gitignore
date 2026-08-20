@@ -1,0 +1,6 @@
+# Local build output
+output/
+_build*/
+
+# Never commit your cosign private key
+cosign.key

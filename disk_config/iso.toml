@@ -1,0 +1,27 @@
+# Configuration for the installer ISO, used by bootc-image-builder.
+#
+# The ISO boots the Anaconda installer. The kickstart below runs at the end of
+# the installation and points the installed system at your published image, so
+# future "bootc upgrade" runs pull from there.
+
+[customizations.installer.kickstart]
+contents = """
+%post
+bootc switch --mutate-in-place --transport registry ghcr.io/myorg/myimage:latest
+%end
+"""
+
+# Which installer screens to show. Fewer modules = a shorter, simpler install.
+[customizations.installer.modules]
+enable = [
+  "org.fedoraproject.Anaconda.Modules.Users",
+  "org.fedoraproject.Anaconda.Modules.Storage",
+  "org.fedoraproject.Anaconda.Modules.Runtime",
+  "org.fedoraproject.Anaconda.Modules.Network",
+  "org.fedoraproject.Anaconda.Modules.Timezone",
+]
+disable = [
+  "org.fedoraproject.Anaconda.Modules.Security",
+  "org.fedoraproject.Anaconda.Modules.Services",
+  "org.fedoraproject.Anaconda.Modules.Subscription",
+]

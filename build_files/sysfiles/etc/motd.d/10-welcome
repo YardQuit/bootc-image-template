@@ -1,0 +1,2 @@
+Welcome to myimage - built from https://github.com/myorg/myimage
+Update with: sudo bootc upgrade && systemctl reboot

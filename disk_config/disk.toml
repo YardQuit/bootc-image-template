@@ -1,0 +1,25 @@
+# Configuration for disk images (qcow2 / raw), used by bootc-image-builder.
+#
+# Full reference:
+# https://github.com/osbuild/bootc-image-builder/blob/main/README.md
+
+# Root filesystem size. Grow it if your image is large.
+[[customizations.filesystem]]
+mountpoint = "/"
+minsize = "20 GiB"
+
+# A separate /home is optional:
+# [[customizations.filesystem]]
+# mountpoint = "/home"
+# minsize = "10 GiB"
+
+# A user to log in with. Without this you get a system you cannot sign in to,
+# so keep at least one user (or add an SSH key).
+[[customizations.user]]
+name = "user"
+password = "changeme"          # change this, or use "key" below instead
+groups = ["wheel"]             # wheel = allowed to use sudo
+# key = "ssh-ed25519 AAAA... you@example.com"
+
+# [customizations]
+# hostname = "myimage"

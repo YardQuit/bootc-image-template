@@ -1,0 +1,14 @@
+# cosign stores a signature as an extra tag alongside the image (a "sigstore
+# attachment") rather than in a separate signature store. containers/image only
+# goes looking for those when this is switched on.
+#
+# Shipping it is harmless before you sign anything: this only says "look for an
+# attachment", never "require one". Nothing is enforced until you add a
+# sigstoreSigned rule to /etc/containers/policy.json - see "Verifying updates on
+# the running system" in README.md. Until then unsigned images pull as normal.
+#
+# containers/image reads this from /etc/containers/registries.d only; there is
+# no /usr location for it, so it belongs in sysfiles under etc/.
+docker:
+    ghcr.io/myorg/myimage:
+        use-sigstore-attachments: true
