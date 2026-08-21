@@ -11,6 +11,7 @@ cronie-anacron
 crontabs
 distrobox
 dnf5-plugins
+emacs
 fastfetch
 fd-find
 firewalld
@@ -29,12 +30,12 @@ tcpdump
 tmux
 tuned
 wireguard-tools
+wl-clipboard
 zoxide
 
 # Uncomment what you need.
 # cargo
 # chromium
-# emacs
 # gh
 # git-lfs
 # golang

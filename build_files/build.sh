@@ -22,6 +22,19 @@ fi
 # Delete these lines if you don't ship scripts.
 chmod -R +x /etc/cron.daily 2>/dev/null || true
 
+### 1a. Donkey - modal editing for Emacs ####################################
+#
+# donkey.el is not packaged in any repo, so fetch it at build time and seed
+# it through /etc/skel, next to the init.el/config.el that section 1 just
+# copied there. Its README wants it at donkey/donkey.el inside the user's
+# Emacs directory; config.el loads it from there and enables donkey-mode.
+#
+# Unpinned on purpose, like the -latest RPM examples below: every image
+# build ships the current version. To build the same version every time,
+# replace refs/heads/master with a tag, e.g. refs/tags/1.3.2.
+curl -fLo /etc/skel/.config/emacs/donkey/donkey.el --create-dirs \
+    https://raw.githubusercontent.com/YardQuit/donkey/refs/heads/master/donkey.el
+
 ### 2. Packages that install into /opt ######################################
 #
 # Skip this unless you install something that lives in /opt - Chrome, various
