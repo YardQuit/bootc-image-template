@@ -303,8 +303,9 @@ instructions, the default keybindings and how to customise them - or press
 so section 1a of `build_files/build.sh` fetches `donkey.el` at image build
 time, pinned to a commit and verified against a sha256 - it is executable
 elisp that lands in every user account, so the fetch is tamper-evident rather
-than tracking a branch. The comment there shows the one-liner that computes
-the new commit and hash when you want to move to a newer Donkey. To remove
+than tracking a branch. To move to a newer Donkey, the comment there shows
+both steps: `git ls-remote` to look up the commit you want, and a `curl |
+sha256sum` line to compute its hash. To remove
 Donkey but keep Emacs, delete its block in `config.el` and section 1a; to
 remove both, also drop `emacs` from `rpm_packages`.
 

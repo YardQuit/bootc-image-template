@@ -33,11 +33,11 @@ chmod -R +x /etc/cron.daily 2>/dev/null || true
 # executable elisp that ends up in every account on every machine running
 # the image, and a moved tag or a compromised branch would otherwise walk
 # straight in. The cost is that donkey no longer updates by itself - to
-# move to a newer donkey, run
+# move to a newer donkey, look up the commit you want (ls-remote answers
+# for a branch or a tag), hash it, and put both values below:
 #
+#   git ls-remote https://github.com/YardQuit/donkey master
 #   curl -fsSL https://raw.githubusercontent.com/YardQuit/donkey/<commit>/donkey.el | sha256sum
-#
-# and put the commit and the printed hash below.
 DONKEY_COMMIT="7ba0ede7f179a90bb6079e24d99eb95c676f92c1"   # 1.3.2
 DONKEY_SHA256="cd929da01006fe6e7abac022e25957e4eadd761cca8bf0b9638a23e68f9ca96c"
 
@@ -49,9 +49,16 @@ install -d -m 0755 /etc/skel/.config/emacs/donkey
 # --retry absorbs the transient registry blip that would otherwise abort a
 # scheduled CI build; a genuine failure still stops the build once the
 # retries are spent, and a checksum mismatch stops it right here.
-curl -fL --retry 3 --retry-all-errors --connect-timeout 15 \
+# --max-time bounds the whole transfer, not just the connect: a server that
+# accepts the connection and then stalls would otherwise hang the build
+# until the CI job timeout, with --retry never getting a turn.
+curl -fL --retry 3 --retry-all-errors --connect-timeout 15 --max-time 120 \
     -o /etc/skel/.config/emacs/donkey/donkey.el \
     "https://raw.githubusercontent.com/YardQuit/donkey/${DONKEY_COMMIT}/donkey.el"
+# curl creates the file with the build's umask - pin the mode the same way
+# install -d pinned the directory's, or a hardened builder (umask 027) ships
+# a donkey.el other users cannot read.
+chmod 0644 /etc/skel/.config/emacs/donkey/donkey.el
 echo "${DONKEY_SHA256}  /etc/skel/.config/emacs/donkey/donkey.el" | sha256sum -c -
 
 ### 2. Packages that install into /opt ######################################

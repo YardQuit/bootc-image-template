@@ -70,6 +70,17 @@ if ! [[ "${NEW_NAME}" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
     exit 1
 fi
 
+# Enforce the reservation from the caveat above: an image named "donkey"
+# passes the character check, but the next rename away from it would rewrite
+# the Donkey package paths in build.sh - consistently enough that the build
+# still passes while every account silently ships without Donkey. The guard
+# below only protects the upstream URLs, not those paths, so refuse here.
+if [ "${NEW_NAME,,}" = "donkey" ]; then
+    echo "Error: 'donkey' is reserved - build.sh and README.md refer to the" >&2
+    echo "Donkey Emacs package by that name. Pick a different image name." >&2
+    exit 1
+fi
+
 # One input, three renderings:
 #   NAME_LOWER  everywhere that is a real image reference - registries reject
 #               uppercase, so this is the only form that may appear in a tag,
@@ -86,6 +97,15 @@ if [ -n "${NEW_OWNER}" ] && ! [[ "${NEW_OWNER}" =~ ^[A-Za-z0-9][A-Za-z0-9-]*$ ]]
     echo "Error: '${NEW_OWNER}' is not a valid GitHub owner name." >&2
     echo "Use the handle from your repository URL (github.com/<owner>/<repo>)," >&2
     echo "not your display name." >&2
+    exit 1
+fi
+
+# Same reservation as for the image name: the owner substitution is
+# case-insensitive, so an owner called "donkey" would rewrite the package's
+# name in prose and paths on the rename after this one.
+if [ "${NEW_OWNER,,}" = "donkey" ]; then
+    echo "Error: an owner named 'donkey' would collide with the Donkey Emacs" >&2
+    echo "package references in build.sh and README.md." >&2
     exit 1
 fi
 
