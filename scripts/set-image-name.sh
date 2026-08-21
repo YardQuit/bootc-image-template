@@ -270,7 +270,8 @@ OLD_OWNER_RE=$(printf '%s' "${OLD_OWNER}" | sed 's/[].[^$*\\/]/\\&/g')
 
 echo "image name : ${OLD_NAME} -> ${NAME_LOWER}  (README.md: ${NAME_CAP}, ISO: ${NAME_LOWER^^})"
 if [ -n "${NEW_OWNER}" ]; then
-    echo "owner      : ${OLD_OWNER:-?} -> ${NEW_OWNER}"
+    # NEW_OWNER set implies OLD_OWNER is known - the refusal above guarantees it.
+    echo "owner      : ${OLD_OWNER} -> ${NEW_OWNER}"
 fi
 echo
 
@@ -292,11 +293,24 @@ for file in "${FILES[@]}"; do
         continue
     fi
 
-    # Count the replacements this file would get, for the summary line.
-    # (NEW_OWNER set implies OLD_OWNER is known - checked far above.)
-    hits=$(grep -c -F -w -e "${OLD_NAME}" "${file}" || true)
+    # Count the lines the substitutions below would actually rewrite - the
+    # count decides whether the file is skipped, so it must see exactly what
+    # the sed passes see. That means: the same case renderings each pass
+    # rewrites (lowercase and UPPERCASE in every file, the Capitalised form
+    # only in README.md - an arbitrary case variant like "MyImAgE" is never
+    # rewritten and must not count), the owner case-insensitively (its sed
+    # uses the I flag), and never a Donkey-upstream line, which the guard
+    # branches past. The greps exit non-zero on no match, hence the || true
+    # under set -o pipefail.
+    name_pats=(-e "${OLD_NAME}" -e "${OLD_NAME^^}")
+    if [ "${file}" = "README.md" ]; then
+        name_pats+=(-e "${OLD_NAME^}")
+    fi
+    hits=$({ grep -F -w "${name_pats[@]}" -- "${file}" || true; } \
+           | { grep -v -i -F -e "${DONKEY_UPSTREAM}" || true; } | wc -l)
     if [ -n "${NEW_OWNER}" ]; then
-        hits=$(( hits + $(grep -c -F -w -e "${OLD_OWNER}" "${file}" || true) ))
+        hits=$(( hits + $({ grep -i -F -w -e "${OLD_OWNER}" -- "${file}" || true; } \
+                          | { grep -v -i -F -e "${DONKEY_UPSTREAM}" || true; } | wc -l) ))
     fi
 
     if [ "${hits}" -eq 0 ]; then
