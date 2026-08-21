@@ -63,9 +63,10 @@ Commented examples, off by default, cover packages that install into `/opt`
 
    The owner is always lowercased. One caveat: renaming is a whole-word text
    substitution across the repository, README prose included, so avoid naming
-   your image after an ordinary English word that appears here. `donkey` is
-   reserved outright - the build and this README refer to the Donkey Emacs
-   package by that name.
+   your image after an ordinary English word that appears here. The script
+   enforces this where it would break builds rather than prose: a name or
+   owner that already appears in the build-critical files - `donkey`,
+   `emacs`, `build` and the like - is refused, with a list of the collisions.
 
 3. Choose a base image in `Containerfile`, and list the packages you want in
    `build_files/rpm_packages`.

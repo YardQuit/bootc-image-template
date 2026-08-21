@@ -51,12 +51,14 @@ install -d -m 0755 /etc/skel/.config/emacs/donkey
 # retries are spent, and a checksum mismatch stops it right here.
 # A stalled transfer is aborted per attempt by --speed-limit/--speed-time
 # (under 1 byte/s for 30 s), which --retry treats as transient like any
-# other failure. --max-time stays as the outer bound on the whole operation,
-# retries included, so nothing can hang the build - but it cannot be the
-# only stall defence: one stalled attempt would spend the entire budget and
-# curl would exit without ever retrying.
+# other failure. --max-time caps each single attempt - it resets on retry,
+# so it bounds nothing overall. --retry-max-time is the real outer bound:
+# once it has passed, no further retries start, and the worst case is that
+# bound plus one attempt. Without it a server dribbling just fast enough to
+# dodge the speed check could hold the build for every retry's full
+# max-time in a row.
 curl -fL --retry 3 --retry-all-errors --connect-timeout 15 \
-    --speed-limit 1 --speed-time 30 --max-time 300 \
+    --speed-limit 1 --speed-time 30 --max-time 120 --retry-max-time 300 \
     -o /etc/skel/.config/emacs/donkey/donkey.el \
     "https://raw.githubusercontent.com/YardQuit/donkey/${DONKEY_COMMIT}/donkey.el"
 # curl creates the file with the build's umask - pin the mode the same way

@@ -22,10 +22,11 @@
 # including README.md prose. Avoid naming your image after an ordinary English
 # word that appears there - "second", "image", "build" and the like - or the
 # next rename will rewrite that prose along with the real references. The
-# script refuses a new name or owner that already occurs in the non-README
-# files it rewrites ("donkey", "emacs", "build", ...): after such a rename the
-# next one could not tell those occurrences from image references, and would
-# silently corrupt build-critical paths along with them.
+# script enforces this where it breaks builds rather than prose: a new image
+# name that already occurs in the non-README files it rewrites, or a new
+# owner that occurs in any of them, README included ("donkey", "emacs",
+# "build", ...), is refused - after such a rename the next one could not tell
+# those occurrences from image references, and would silently corrupt them.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -65,10 +66,15 @@ if [ -z "${NEW_NAME}" ]; then
 fi
 
 # Accept the name in any case - it is normalised per file below. Registries
-# only allow these characters, whatever the capitalisation.
-if ! [[ "${NEW_NAME}" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
+# only allow these characters, whatever the capitalisation. The first and
+# last characters must be alphanumeric: registries reject trailing
+# separators anyway, and a name ending in "." or "-" would slip past the
+# collision scan below (grep -w) while still matching at sed's \b during a
+# later rename - the mismatch that corrupts paths silently.
+if ! [[ "${NEW_NAME}" =~ ^[A-Za-z0-9]([A-Za-z0-9._-]*[A-Za-z0-9])?$ ]]; then
     echo "Error: '${NEW_NAME}' is not a valid image name." >&2
-    echo "Use letters, digits, dots, underscores and dashes." >&2
+    echo "Use letters, digits, dots, underscores and dashes; start and end" >&2
+    echo "with a letter or digit." >&2
     exit 1
 fi
 
@@ -85,7 +91,9 @@ NAME_LOWER="${NEW_NAME,,}"
 NAME_CAP="${NAME_LOWER^}"
 NAME_UPPER="${NAME_LOWER^^}"
 
-if [ -n "${NEW_OWNER}" ] && ! [[ "${NEW_OWNER}" =~ ^[A-Za-z0-9][A-Za-z0-9-]*$ ]]; then
+# Same trailing-alphanumeric requirement as the image name, for the same
+# reason - and GitHub itself forbids a handle ending in "-".
+if [ -n "${NEW_OWNER}" ] && ! [[ "${NEW_OWNER}" =~ ^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?$ ]]; then
     echo "Error: '${NEW_OWNER}' is not a valid GitHub owner name." >&2
     echo "Use the handle from your repository URL (github.com/<owner>/<repo>)," >&2
     echo "not your display name." >&2
@@ -100,6 +108,21 @@ if [ -n "${NEW_OWNER}" ] && [ "${NEW_OWNER}" != "${NEW_OWNER,,}" ]; then
     echo "Note: using '${NEW_OWNER,,}' - image references must be lowercase."
 fi
 NEW_OWNER="${NEW_OWNER,,}"
+
+# The name and owner must not overlap each other as whole words, in either
+# direction. "zonkul zonkul" (or image "zonk" with owner "zonk-labs") passes
+# the file scan below - neither value is in the files yet - but a later
+# rename could not tell the two apart inside ghcr.io/<owner>/<image> and
+# would rewrite both halves at once.
+if [ -n "${NEW_OWNER}" ]; then
+    if grep -q -i -w -F -e "${NAME_LOWER}" <<<"${NEW_OWNER}" \
+       || grep -q -i -w -F -e "${NEW_OWNER}" <<<"${NAME_LOWER}"; then
+        echo "Error: the image name '${NAME_LOWER}' and the owner '${NEW_OWNER}'" >&2
+        echo "overlap as whole words - a later rename could not tell them apart" >&2
+        echo "in ghcr.io/<owner>/<image> references. Pick distinct values." >&2
+        exit 1
+    fi
+fi
 
 # \b (word boundary) below is a GNU sed feature.
 if ! sed --version >/dev/null 2>&1; then
@@ -126,10 +149,23 @@ OLD_OWNER=$(sed -n 's|.*ghcr\.io/\([^/]*\)/.*|\1|p' disk_config/iso.toml | head 
 if [ "${OLD_NAME,,}" = "donkey" ] || [ "${OLD_OWNER,,}" = "donkey" ]; then
     echo "Error: the current image name or owner is 'donkey', which cannot be" >&2
     echo "told apart from the Donkey Emacs package references in" >&2
-    echo "build_files/build.sh. Restore section 1a of build.sh (and the" >&2
-    echo "README's Donkey section) from the template before renaming." >&2
+    echo "build_files/build.sh. This script cannot fix that itself - by hand:" >&2
+    echo "  1. Edit the image references to the new name in the files this" >&2
+    echo "     script manages (see FILES at the top; start with IMAGE_NAME in" >&2
+    echo "     .github/workflows/build.yml and ghcr.io/... in disk_config/)," >&2
+    echo "     leaving the Donkey package paths (donkey/donkey.el," >&2
+    echo "     /etc/skel/.config/emacs/donkey, yardquit/donkey) untouched." >&2
+    echo "  2. Compare build.sh section 1a and the README's Donkey section" >&2
+    echo "     against the template and restore anything a past rename broke." >&2
     exit 1
 fi
+
+# The Donkey upstream repository, as it appears in build.sh's fetch URL and
+# the README's links. The collision scan below and the substitution guard
+# further down both derive from this one value, so they cannot drift apart:
+# lines matching it are never rewritten, and therefore never count as
+# collisions either.
+DONKEY_UPSTREAM='yardquit/donkey'
 
 # Refuse a new value that already occurs in the files this script rewrites:
 # after this rename those occurrences would be indistinguishable from image
@@ -149,7 +185,7 @@ check_new_value() {  # $1 = "image name"|"owner"   $2 = candidate   $3 = current
         [ -f "${file}" ] && scan+=("${file}")
     done
     hits=$(grep -H -n -i -w -F -e "${candidate}" -- "${scan[@]}" 2>/dev/null \
-           | grep -v -i 'yardquit/donkey' || true)
+           | grep -v -i -F -e "${DONKEY_UPSTREAM}" || true)
     if [ -n "${hits}" ]; then
         echo "Error: the ${label} '${candidate}' already appears in files this" >&2
         echo "script rewrites, where it is not an image reference. A later" >&2
@@ -160,7 +196,10 @@ check_new_value() {  # $1 = "image name"|"owner"   $2 = candidate   $3 = current
     fi
 }
 check_new_value "image name" "${NAME_LOWER}" "${OLD_NAME}"
-if [ -n "${NEW_OWNER}" ]; then
+# Skipped when the current owner is unknown: the rename loop below writes the
+# owner only when OLD_OWNER is set, so with it empty the owner argument never
+# reaches any file and a collision cannot happen.
+if [ -n "${NEW_OWNER}" ] && [ -n "${OLD_OWNER}" ]; then
     check_new_value "owner" "${NEW_OWNER}" "${OLD_OWNER}"
 fi
 
@@ -187,7 +226,8 @@ FENCE='/^```/,/^```/'
 # build.sh and README.md) are not image references: rewriting the owner there
 # breaks the build-time fetch with a 404 and dead links. This address matches
 # them case-insensitively; every substitution below branches past such lines.
-DONKEY_GUARD='\#yardquit/donkey#I'
+# Derived from DONKEY_UPSTREAM above so guard and collision scan stay in step.
+DONKEY_GUARD="\\#${DONKEY_UPSTREAM}#I"
 
 for file in "${FILES[@]}"; do
     if [ ! -f "${file}" ]; then
