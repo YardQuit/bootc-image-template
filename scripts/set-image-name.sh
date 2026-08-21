@@ -22,11 +22,18 @@
 # including README.md prose. Avoid naming your image after an ordinary English
 # word that appears there - "second", "image", "build" and the like - or the
 # next rename will rewrite that prose along with the real references. The
-# script enforces this where it breaks builds rather than prose: a new image
-# name that already occurs in the non-README files it rewrites, or a new
-# owner that occurs in any of them, README included ("donkey", "emacs",
-# "build", ...), is refused - after such a rename the next one could not tell
-# those occurrences from image references, and would silently corrupt them.
+# script refuses up front what a rename would silently corrupt, and says
+# which lines collide:
+#   - a new image name that already occurs in the non-README files it
+#     rewrites, or a new owner that occurs in any of them, README included
+#     ("donkey", "emacs", "build", ...);
+#   - a new name and owner that overlap each other as whole words, or a new
+#     name that overlaps the current owner ("myorg-x" under owner "myorg");
+#   - running at all while the current name and owner already overlap, or
+#     while either is "donkey" - those need a hand-edit first, and the
+#     error says exactly what to do;
+#   - an owner change when the current owner cannot be read from
+#     disk_config/iso.toml - there would be nothing to substitute.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -247,10 +254,9 @@ check_new_value() {  # $1 = "image name"|"owner"   $2 = candidate   $3 = current
     fi
 }
 check_new_value "image name" "${NAME_LOWER}" "${OLD_NAME}"
-# Skipped when the current owner is unknown: the rename loop below writes the
-# owner only when OLD_OWNER is set, so with it empty the owner argument never
-# reaches any file and a collision cannot happen.
-if [ -n "${NEW_OWNER}" ] && [ -n "${OLD_OWNER}" ]; then
+# NEW_OWNER set implies OLD_OWNER is known - the refusal further up already
+# rejected an owner change with no current owner to substitute.
+if [ -n "${NEW_OWNER}" ]; then
     check_new_value "owner" "${NEW_OWNER}" "${OLD_OWNER}"
 fi
 
@@ -287,8 +293,9 @@ for file in "${FILES[@]}"; do
     fi
 
     # Count the replacements this file would get, for the summary line.
+    # (NEW_OWNER set implies OLD_OWNER is known - checked far above.)
     hits=$(grep -c -F -w -e "${OLD_NAME}" "${file}" || true)
-    if [ -n "${NEW_OWNER}" ] && [ -n "${OLD_OWNER}" ]; then
+    if [ -n "${NEW_OWNER}" ]; then
         hits=$(( hits + $(grep -c -F -w -e "${OLD_OWNER}" "${file}" || true) ))
     fi
 
@@ -336,7 +343,7 @@ for file in "${FILES[@]}"; do
         sed -i -e "${DONKEY_GUARD}b" \
                -e "s#\b${OLD_NAME_RE}\b#${NAME_LOWER}#g" "${file}"
     fi
-    if [ -n "${NEW_OWNER}" ] && [ -n "${OLD_OWNER}" ]; then
+    if [ -n "${NEW_OWNER}" ]; then
         sed -i -e "${DONKEY_GUARD}b" \
                -e "s#\b${OLD_OWNER_RE}\b#${NEW_OWNER}#gI" "${file}"
     fi
