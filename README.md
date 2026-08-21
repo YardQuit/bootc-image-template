@@ -23,6 +23,10 @@ stands, and every default below is a plain, commented line in
   installed and `crond` enabled; anacron catches up jobs whose window was
   missed while the machine was off.
 - **`tuned` and `firewalld`** installed and enabled.
+- **Emacs with Donkey modal editing.** Every new user account starts with a
+  ready-made XDG-native Emacs configuration
+  ([Donkey](https://github.com/YardQuit/donkey) enabled, `~/.emacs.d` never
+  created) - see "Emacs and Donkey" below.
 - **A sensible package set** - `bat`, `btop`, `distrobox`, `fastfetch`, `fzf`,
   `helix`, `htop`, `neovim`, `podman-compose`, `ripgrep`, `tmux`, `zoxide` and
   a few more, all in one flat alphabetical list.
@@ -88,6 +92,7 @@ want to install it without logging in to `ghcr.io`.
 | `build_files/build.sh` | Everything done inside the image: copy files, install packages, enable services. |
 | `build_files/rpm_packages` | The package list, one per line. Comments allowed. |
 | `build_files/sysfiles/` | Files copied into the image, mirroring the real layout (`sysfiles/etc/foo` -> `/etc/foo`). |
+| `build_files/sysfiles/etc/skel/.config/emacs/` | Default per-user Emacs configuration, seeded into every new user account. |
 | `build_files/sysfiles/usr/lib/tmpfiles.d/10-image-var-dirs.conf` | Recreates the `/var` directories the installed packages expect, on every boot. |
 | `build_files/sysfiles/usr/lib/bootc/kargs.d/00-graphical-boot.toml` | Kernel arguments (`rhgb quiet`) so plymouth draws a boot splash. |
 | `build_files/sysfiles/usr/lib/systemd/system/bootc-fetch-apply-updates.service.d/10-stage-only.conf` | Makes the update timer stage updates without rebooting. |
@@ -275,6 +280,50 @@ Unlike a plain bootc base, this image does have a working `/etc/cron.daily` -
 `cronie-anacron`, `crontabs` and an enabled `crond` - so a daily script dropped
 in there runs. Use it for your own jobs; the image updates itself through bootc,
 not through cron.
+
+## Emacs and Donkey
+
+`emacs` is in `rpm_packages`, and every user account created on the machine
+starts with a ready-made configuration, seeded from `/etc/skel`:
+
+| File | Purpose |
+| --- | --- |
+| `~/.config/emacs/init.el` | Bootstrap only: loads `config.el` and receives the blocks Customize writes. Not meant to be edited by hand. |
+| `~/.config/emacs/config.el` | The configuration you edit. |
+| `~/.config/emacs/donkey/donkey.el` | [Donkey](https://github.com/YardQuit/donkey), loaded and enabled from `config.el`. |
+
+[Donkey](https://github.com/YardQuit/donkey) is an opinionated modal editing
+minor-mode that layers on top of stock Emacs rather than replacing it. It is
+enabled by default in every buffer; see the
+[Donkey README](https://github.com/YardQuit/donkey#readme) for usage
+instructions, the default keybindings and how to customise them - or press
+`g ?` inside Emacs for the interactive tutor. It is not packaged in any repo,
+so section 1a of `build_files/build.sh` fetches `donkey.el` from its
+repository's `master` branch at image build time - each image build ships the
+current version. The comment there shows how to pin a tag instead. To remove
+Donkey but keep Emacs, delete its block in `config.el` and section 1a; to
+remove both, also drop `emacs` from `rpm_packages`.
+
+Three things are deliberate about the layout:
+
+- **`~/.emacs.d` is never created.** Because `~/.config/emacs` exists before
+  the first Emacs start, Emacs adopts it as its one directory - packages,
+  auto-saves and eln-cache land there too. The reverse also holds: a
+  hand-created `~/.emacs`, `~/.emacs.el` or `~/.emacs.d` takes precedence and
+  disables this configuration, so don't.
+- **Customize output stays out of `config.el`.** `custom-file` is left unset
+  on purpose, which makes Customize save its `custom-set-variables` blocks
+  into `init.el` - machine-written forms in one file, hand-written
+  configuration in the other. Note that Customize's values are applied after
+  `config.el`, so they win when both set the same variable.
+- **`/etc/skel` only reaches new accounts.** Users created before a machine
+  switched to this image keep their existing home directories untouched; copy
+  the files from `/etc/skel/.config/emacs/` by hand if you want the setup in
+  an existing account.
+
+`wl-clipboard` is installed alongside, so Donkey's clipboard integration works
+in terminal frames (`emacs -nw`, `emacsclient -t`) on Wayland; graphical Emacs
+does not need it.
 
 ## Signing (optional)
 
