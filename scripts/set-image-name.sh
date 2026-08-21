@@ -21,7 +21,9 @@
 # One caveat: renaming is a whole-word text substitution across the files below,
 # including README.md prose. Avoid naming your image after an ordinary English
 # word that appears there - "second", "image", "build" and the like - or the
-# next rename will rewrite that prose along with the real references.
+# next rename will rewrite that prose along with the real references. "donkey"
+# is reserved outright: build.sh and the README reference the Donkey Emacs
+# package by that name, and an image called donkey would rewrite those paths.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -130,6 +132,12 @@ echo
 # inside the double-quoted sed scripts.
 FENCE='/^```/,/^```/'
 
+# Lines that reference the Donkey upstream repository (yardquit/donkey URLs in
+# build.sh and README.md) are not image references: rewriting the owner there
+# breaks the build-time fetch with a 404 and dead links. This address matches
+# them case-insensitively; every substitution below branches past such lines.
+DONKEY_GUARD='\#yardquit/donkey#I'
+
 for file in "${FILES[@]}"; do
     if [ ! -f "${file}" ]; then
         echo "  skipped (not found): ${file}"
@@ -154,7 +162,8 @@ for file in "${FILES[@]}"; do
 
     # The uppercase rendering appears in the ISO filename and in the comments
     # that quote it, in any file - so this pass runs everywhere.
-    sed -i "s#\b${OLD_NAME_UPPER_RE}\b#${NAME_UPPER}#g" "${file}"
+    sed -i -e "${DONKEY_GUARD}b" \
+           -e "s#\b${OLD_NAME_UPPER_RE}\b#${NAME_UPPER}#g" "${file}"
 
     if [ "${file}" = "README.md" ]; then
         # The README carries all three renderings at once: the ISO filename is
@@ -170,20 +179,24 @@ for file in "${FILES[@]}"; do
         # name has to read exactly as it does in the file itself. So the
         # lowercase rule applies inside a fence, and only outside it does the
         # capitalised form take over.
-        sed -i "${FENCE}{s#\b\(${OLD_NAME_RE}\|${OLD_NAME_CAP_RE}\)\b#${NAME_LOWER}#g}" "${file}"
+        sed -i -e "${DONKEY_GUARD}b" \
+               -e "${FENCE}{s#\b\(${OLD_NAME_RE}\|${OLD_NAME_CAP_RE}\)\b#${NAME_LOWER}#g}" "${file}"
         # "b" branches past the rest of the script for lines inside a fence, so
         # the prose rules cannot undo the pass above.
-        sed -i -e "${FENCE}b" \
+        sed -i -e "${DONKEY_GUARD}b" \
+               -e "${FENCE}b" \
                -e "s#\(^\|[^/]\)\b\(${OLD_NAME_RE}\|${OLD_NAME_CAP_RE}\)\b#\1${NAME_CAP}#g" \
                -e "s#/\b${OLD_NAME_RE}\b#/${NAME_LOWER}#g" "${file}"
     else
         # Outside the README the name is always a real image reference and stays
         # lowercase - except where a comment quotes the ISO filename, which is
         # uppercase and was handled by the pass above.
-        sed -i "s#\b${OLD_NAME_RE}\b#${NAME_LOWER}#g" "${file}"
+        sed -i -e "${DONKEY_GUARD}b" \
+               -e "s#\b${OLD_NAME_RE}\b#${NAME_LOWER}#g" "${file}"
     fi
     if [ -n "${NEW_OWNER}" ] && [ -n "${OLD_OWNER}" ]; then
-        sed -i "s#\b${OLD_OWNER_RE}\b#${NEW_OWNER}#gI" "${file}"
+        sed -i -e "${DONKEY_GUARD}b" \
+               -e "s#\b${OLD_OWNER_RE}\b#${NEW_OWNER}#gI" "${file}"
     fi
     echo "  updated ${hits} line(s): ${file}"
 done

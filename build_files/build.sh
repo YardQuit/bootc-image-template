@@ -29,11 +29,30 @@ chmod -R +x /etc/cron.daily 2>/dev/null || true
 # copied there. Its README wants it at donkey/donkey.el inside the user's
 # Emacs directory; config.el loads it from there and enables donkey-mode.
 #
-# Unpinned on purpose, like the -latest RPM examples below: every image
-# build ships the current version. To build the same version every time,
-# replace refs/heads/master with a tag, e.g. refs/tags/1.3.2.
-curl -fLo /etc/skel/.config/emacs/donkey/donkey.el --create-dirs \
-    https://raw.githubusercontent.com/YardQuit/donkey/refs/heads/master/donkey.el
+# The fetch is pinned to a commit and checked against a hash: this file is
+# executable elisp that ends up in every account on every machine running
+# the image, and a moved tag or a compromised branch would otherwise walk
+# straight in. The cost is that donkey no longer updates by itself - to
+# move to a newer donkey, run
+#
+#   curl -fsSL https://raw.githubusercontent.com/YardQuit/donkey/<commit>/donkey.el | sha256sum
+#
+# and put the commit and the printed hash below.
+DONKEY_COMMIT="7ba0ede7f179a90bb6079e24d99eb95c676f92c1"   # 1.3.2
+DONKEY_SHA256="cd929da01006fe6e7abac022e25957e4eadd761cca8bf0b9638a23e68f9ca96c"
+
+# The directory is created explicitly: curl's --create-dirs would make it
+# 0750, and /etc/skel content must be world-readable or copying it by hand
+# into an existing account fails (section 1's sysfiles copy ships 0755).
+install -d -m 0755 /etc/skel/.config/emacs/donkey
+
+# --retry absorbs the transient registry blip that would otherwise abort a
+# scheduled CI build; a genuine failure still stops the build once the
+# retries are spent, and a checksum mismatch stops it right here.
+curl -fL --retry 3 --retry-all-errors --connect-timeout 15 \
+    -o /etc/skel/.config/emacs/donkey/donkey.el \
+    "https://raw.githubusercontent.com/YardQuit/donkey/${DONKEY_COMMIT}/donkey.el"
+echo "${DONKEY_SHA256}  /etc/skel/.config/emacs/donkey/donkey.el" | sha256sum -c -
 
 ### 2. Packages that install into /opt ######################################
 #

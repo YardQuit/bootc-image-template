@@ -63,7 +63,9 @@ Commented examples, off by default, cover packages that install into `/opt`
 
    The owner is always lowercased. One caveat: renaming is a whole-word text
    substitution across the repository, README prose included, so avoid naming
-   your image after an ordinary English word that appears here.
+   your image after an ordinary English word that appears here. `donkey` is
+   reserved outright - the build and this README refer to the Donkey Emacs
+   package by that name.
 
 3. Choose a base image in `Containerfile`, and list the packages you want in
    `build_files/rpm_packages`.
@@ -298,9 +300,11 @@ enabled by default in every buffer; see the
 [Donkey README](https://github.com/YardQuit/donkey#readme) for usage
 instructions, the default keybindings and how to customise them - or press
 `g ?` inside Emacs for the interactive tutor. It is not packaged in any repo,
-so section 1a of `build_files/build.sh` fetches `donkey.el` from its
-repository's `master` branch at image build time - each image build ships the
-current version. The comment there shows how to pin a tag instead. To remove
+so section 1a of `build_files/build.sh` fetches `donkey.el` at image build
+time, pinned to a commit and verified against a sha256 - it is executable
+elisp that lands in every user account, so the fetch is tamper-evident rather
+than tracking a branch. The comment there shows the one-liner that computes
+the new commit and hash when you want to move to a newer Donkey. To remove
 Donkey but keep Emacs, delete its block in `config.el` and section 1a; to
 remove both, also drop `emacs` from `rpm_packages`.
 
@@ -308,7 +312,9 @@ Three things are deliberate about the layout:
 
 - **`~/.emacs.d` is never created.** Because `~/.config/emacs` exists before
   the first Emacs start, Emacs adopts it as its one directory - packages,
-  auto-saves and eln-cache land there too. The reverse also holds: a
+  the `auto-save-list/` session directory and eln-cache land there too (the
+  `#file#` auto-saves themselves sit next to the file being edited, as in
+  stock Emacs). The reverse also holds: a
   hand-created `~/.emacs`, `~/.emacs.el` or `~/.emacs.d` takes precedence and
   disables this configuration, so don't.
 - **Customize output stays out of `config.el`.** `custom-file` is left unset
