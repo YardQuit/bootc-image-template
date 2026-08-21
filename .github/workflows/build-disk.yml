@@ -227,3 +227,10 @@ jobs:
 
           echo "Uploading to S3:${S3_BUCKET_NAME}/${S3_PREFIX}/"
           rclone copy --stats=30s --stats-one-line output "S3:${S3_BUCKET_NAME}/${S3_PREFIX}"
+
+          # rclone copy is silent on success (the NOTICE about a missing config
+          # file is normal - the remote is defined entirely by the env vars
+          # above), which reads like a failure. End with proof instead: list
+          # what the bucket now holds under this prefix, name and size.
+          echo "Uploaded:"
+          rclone ls "S3:${S3_BUCKET_NAME}/${S3_PREFIX}"
