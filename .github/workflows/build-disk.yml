@@ -65,6 +65,10 @@ jobs:
 
       - name: Build ISO
         id: build
+        env:
+          # Provided automatically by GitHub; no secret to create. The job's
+          # "packages: read" permission above is what makes it usable here.
+          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
 
@@ -79,6 +83,25 @@ jobs:
 
           mkdir -p output
 
+          # Log in before pulling. A package published by build.yml is private
+          # until you make it public on its GHCR package page, and an anonymous
+          # pull of a private package fails while requesting a bearer token:
+          #
+          #   Requesting bearer token: received unexpected HTTP status: 403 Forbidden
+          #
+          # ghcr.io answers exactly the same way for a package that does not
+          # exist at all, so that error on its own does not tell you which of
+          # the two you are looking at. Logging in every time keeps a private
+          # package working and narrows a 403 down to "never published" - check
+          # that build.yml ran on your default branch and its push step was not
+          # skipped.
+          #
+          # Under sudo, like the pull below, so the credentials land in root's
+          # auth file where that pull can actually see them.
+          sudo podman login ghcr.io \
+            --username "${GITHUB_ACTOR}" \
+            --password "${REGISTRY_TOKEN}"
+
           # bootc-image-builder does not fetch the image it is told to build any
           # more - it only reads root's container storage, which is bind-mounted
           # below. Without this pull it stops at "image not known" while
@@ -87,9 +110,6 @@ jobs:
           # This runs under sudo on purpose: the builder reads root's storage,
           # and a rootless pull would land in the runner user's storage instead.
           sudo podman pull "${IMAGE_REF}"
-
-          # If your package is private, log in before that pull:
-          #   sudo podman login ghcr.io -u "${GITHUB_ACTOR}" -p "${{ secrets.GITHUB_TOKEN }}"
 
           # Name the ISO after what is actually inside the image, so changing
           # the base in the Containerfile renames the ISO by itself. Both halves

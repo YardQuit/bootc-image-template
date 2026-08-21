@@ -73,8 +73,10 @@ Commented examples, off by default, cover packages that install into `/opt`
 
 3. Choose a base image in `Containerfile`, and list the packages you want in
    `build_files/rpm_packages`.
-4. Commit and push to `main`. The build workflow publishes
-   `ghcr.io/myorg/mydesktop:latest`.
+4. Commit and push to your default branch. The build workflow triggers on
+   `main` and `master` and publishes `ghcr.io/myorg/mydesktop:latest` from
+   whichever is your repository's default; if yours is named something else,
+   add it to the two branch lists in `.github/workflows/build.yml`.
 5. On the machine you want to run it:
 
    ```bash

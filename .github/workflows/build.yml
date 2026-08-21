@@ -16,13 +16,22 @@ on:
   schedule:
     - cron: "00 04 * * *"
   push:
+    # Both common default-branch names, because trigger lists must be literal.
+    # A repository created from this template inherits its creator's default
+    # branch name, so the template cannot know which one it will be - and a
+    # branch missing here fails silently: no build ever runs for it. If your
+    # default branch is named something else, add it to both lists. (The
+    # publish/sign steps below do not need the same edit - they compare
+    # against the repository's actual default branch at run time.)
     branches:
       - main
+      - master
     paths-ignore:
       - "**.md"
   pull_request:
     branches:
       - main
+      - master
   # Adds a "Run workflow" button in the Actions tab.
   workflow_dispatch:
 
@@ -121,11 +130,25 @@ jobs:
             echo "tags=${TAGS[*]}"
           } >> "${GITHUB_OUTPUT}"
 
-      # Everything below only runs for real builds of the main branch, so pull
-      # requests can never publish or sign an image.
+      # Everything below only runs for real builds of the repository's default
+      # branch, so pull requests can never publish or sign an image.
+      #
+      # The gate compares against the actual default branch at run time rather
+      # than naming it - a literal here would have to match whatever branch a
+      # repository created from this template happens to use, and getting it
+      # wrong fails silently: the image still builds, these steps report
+      # "skipped", nothing is pushed, and the first visible symptom is
+      # build-disk.yml failing with "403 Forbidden" while pulling an image
+      # that was never published. Scheduled runs always execute on the default
+      # branch but carry no repository object in their event payload, so they
+      # are let through explicitly. The same condition appears on all three
+      # steps below - keep them identical.
       - name: Push to ghcr.io
         id: push
-        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        if: >-
+          github.event_name != 'pull_request' &&
+          (github.event_name == 'schedule' ||
+           github.ref == format('refs/heads/{0}', github.event.repository.default_branch))
         env:
           # Provided automatically by GitHub; no secret to create.
           REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -159,7 +182,10 @@ jobs:
       # Signing is optional. Without a SIGNING_SECRET the step prints a note and
       # succeeds - see the README for how to create the key pair.
       - name: Install cosign
-        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        if: >-
+          github.event_name != 'pull_request' &&
+          (github.event_name == 'schedule' ||
+           github.ref == format('refs/heads/{0}', github.event.repository.default_branch))
         uses: sigstore/cosign-installer@v4.1.2
         with:
           # Pinned to the 2.x series on purpose. cosign 3.x (the action's
@@ -172,7 +198,10 @@ jobs:
           cosign-release: 'v2.6.5'
 
       - name: Sign image
-        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        if: >-
+          github.event_name != 'pull_request' &&
+          (github.event_name == 'schedule' ||
+           github.ref == format('refs/heads/{0}', github.event.repository.default_branch))
         env:
           COSIGN_PRIVATE_KEY: ${{ secrets.SIGNING_SECRET }}
           # cosign authenticates separately from podman - see below.
