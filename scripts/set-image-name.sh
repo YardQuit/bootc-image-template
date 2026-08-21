@@ -21,9 +21,11 @@
 # One caveat: renaming is a whole-word text substitution across the files below,
 # including README.md prose. Avoid naming your image after an ordinary English
 # word that appears there - "second", "image", "build" and the like - or the
-# next rename will rewrite that prose along with the real references. "donkey"
-# is reserved outright: build.sh and the README reference the Donkey Emacs
-# package by that name, and an image called donkey would rewrite those paths.
+# next rename will rewrite that prose along with the real references. The
+# script refuses a new name or owner that already occurs in the non-README
+# files it rewrites ("donkey", "emacs", "build", ...): after such a rename the
+# next one could not tell those occurrences from image references, and would
+# silently corrupt build-critical paths along with them.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -70,16 +72,6 @@ if ! [[ "${NEW_NAME}" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
     exit 1
 fi
 
-# Enforce the reservation from the caveat above: an image named "donkey"
-# passes the character check, but the next rename away from it would rewrite
-# the Donkey package paths in build.sh - consistently enough that the build
-# still passes while every account silently ships without Donkey. The guard
-# below only protects the upstream URLs, not those paths, so refuse here.
-if [ "${NEW_NAME,,}" = "donkey" ]; then
-    echo "Error: 'donkey' is reserved - build.sh and README.md refer to the" >&2
-    echo "Donkey Emacs package by that name. Pick a different image name." >&2
-    exit 1
-fi
 
 # One input, three renderings:
 #   NAME_LOWER  everywhere that is a real image reference - registries reject
@@ -100,14 +92,6 @@ if [ -n "${NEW_OWNER}" ] && ! [[ "${NEW_OWNER}" =~ ^[A-Za-z0-9][A-Za-z0-9-]*$ ]]
     exit 1
 fi
 
-# Same reservation as for the image name: the owner substitution is
-# case-insensitive, so an owner called "donkey" would rewrite the package's
-# name in prose and paths on the rename after this one.
-if [ "${NEW_OWNER,,}" = "donkey" ]; then
-    echo "Error: an owner named 'donkey' would collide with the Donkey Emacs" >&2
-    echo "package references in build.sh and README.md." >&2
-    exit 1
-fi
 
 # The owner appears in image references such as ghcr.io/<owner>/<image>, where
 # registries reject uppercase. GitHub URLs do not care about case, so the owner
@@ -132,6 +116,53 @@ fi
 
 # The owner appears as ghcr.io/<owner>/<image> in the ISO kickstart.
 OLD_OWNER=$(sed -n 's|.*ghcr\.io/\([^/]*\)/.*|\1|p' disk_config/iso.toml | head -n1)
+
+# A repository can predate the collision check below with "donkey" already in
+# use as its name or owner. Renaming away from that cannot be done safely: the
+# substitutions cannot tell the image apart from the Donkey Emacs package
+# paths in build.sh, and would rewrite both - consistently enough that the
+# build still passes while config.el's donkey/donkey.el load path silently
+# breaks. Stop rather than guess.
+if [ "${OLD_NAME,,}" = "donkey" ] || [ "${OLD_OWNER,,}" = "donkey" ]; then
+    echo "Error: the current image name or owner is 'donkey', which cannot be" >&2
+    echo "told apart from the Donkey Emacs package references in" >&2
+    echo "build_files/build.sh. Restore section 1a of build.sh (and the" >&2
+    echo "README's Donkey section) from the template before renaming." >&2
+    exit 1
+fi
+
+# Refuse a new value that already occurs in the files this script rewrites:
+# after this rename those occurrences would be indistinguishable from image
+# references, and the next rename would rewrite them too - "emacs" would drag
+# the skel paths in build.sh with it, "donkey" the package references, and so
+# on. The scan is case-insensitive (the owner substitution is too, and the
+# README name passes cover three cases), skips the Donkey-upstream URLs that
+# the substitutions below never touch, and for the image name skips
+# README.md, whose prose collisions are the documented caveat above rather
+# than build breakage. Renaming to the value already in use is a no-op, not
+# a collision.
+check_new_value() {  # $1 = "image name"|"owner"   $2 = candidate   $3 = current
+    local label="$1" candidate="$2" current="$3" scan=() file hits
+    [ "${candidate,,}" = "${current,,}" ] && return 0
+    for file in "${FILES[@]}"; do
+        [ "${label}" = "image name" ] && [ "${file}" = "README.md" ] && continue
+        [ -f "${file}" ] && scan+=("${file}")
+    done
+    hits=$(grep -H -n -i -w -F -e "${candidate}" -- "${scan[@]}" 2>/dev/null \
+           | grep -v -i 'yardquit/donkey' || true)
+    if [ -n "${hits}" ]; then
+        echo "Error: the ${label} '${candidate}' already appears in files this" >&2
+        echo "script rewrites, where it is not an image reference. A later" >&2
+        echo "rename could not tell the two apart and would corrupt these:" >&2
+        head -n 5 <<<"${hits}" | sed 's/^/  /' >&2
+        echo "Pick a different ${label}." >&2
+        exit 1
+    fi
+}
+check_new_value "image name" "${NAME_LOWER}" "${OLD_NAME}"
+if [ -n "${NEW_OWNER}" ]; then
+    check_new_value "owner" "${NEW_OWNER}" "${OLD_OWNER}"
+fi
 
 # A name may contain dots, which mean "any character" to sed - escape them.
 OLD_NAME_RE=$(printf '%s' "${OLD_NAME}" | sed 's/[].[^$*\\/]/\\&/g')

@@ -49,10 +49,14 @@ install -d -m 0755 /etc/skel/.config/emacs/donkey
 # --retry absorbs the transient registry blip that would otherwise abort a
 # scheduled CI build; a genuine failure still stops the build once the
 # retries are spent, and a checksum mismatch stops it right here.
-# --max-time bounds the whole transfer, not just the connect: a server that
-# accepts the connection and then stalls would otherwise hang the build
-# until the CI job timeout, with --retry never getting a turn.
-curl -fL --retry 3 --retry-all-errors --connect-timeout 15 --max-time 120 \
+# A stalled transfer is aborted per attempt by --speed-limit/--speed-time
+# (under 1 byte/s for 30 s), which --retry treats as transient like any
+# other failure. --max-time stays as the outer bound on the whole operation,
+# retries included, so nothing can hang the build - but it cannot be the
+# only stall defence: one stalled attempt would spend the entire budget and
+# curl would exit without ever retrying.
+curl -fL --retry 3 --retry-all-errors --connect-timeout 15 \
+    --speed-limit 1 --speed-time 30 --max-time 300 \
     -o /etc/skel/.config/emacs/donkey/donkey.el \
     "https://raw.githubusercontent.com/YardQuit/donkey/${DONKEY_COMMIT}/donkey.el"
 # curl creates the file with the build's umask - pin the mode the same way
