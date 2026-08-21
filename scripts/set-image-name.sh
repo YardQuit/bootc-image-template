@@ -109,21 +109,6 @@ if [ -n "${NEW_OWNER}" ] && [ "${NEW_OWNER}" != "${NEW_OWNER,,}" ]; then
 fi
 NEW_OWNER="${NEW_OWNER,,}"
 
-# The name and owner must not overlap each other as whole words, in either
-# direction. "zonkul zonkul" (or image "zonk" with owner "zonk-labs") passes
-# the file scan below - neither value is in the files yet - but a later
-# rename could not tell the two apart inside ghcr.io/<owner>/<image> and
-# would rewrite both halves at once.
-if [ -n "${NEW_OWNER}" ]; then
-    if grep -q -i -w -F -e "${NAME_LOWER}" <<<"${NEW_OWNER}" \
-       || grep -q -i -w -F -e "${NEW_OWNER}" <<<"${NAME_LOWER}"; then
-        echo "Error: the image name '${NAME_LOWER}' and the owner '${NEW_OWNER}'" >&2
-        echo "overlap as whole words - a later rename could not tell them apart" >&2
-        echo "in ghcr.io/<owner>/<image> references. Pick distinct values." >&2
-        exit 1
-    fi
-fi
-
 # \b (word boundary) below is a GNU sed feature.
 if ! sed --version >/dev/null 2>&1; then
     echo "Error: this script needs GNU sed (standard on Linux)." >&2
@@ -137,8 +122,48 @@ if [ -z "${OLD_NAME}" ]; then
     exit 1
 fi
 
-# The owner appears as ghcr.io/<owner>/<image> in the ISO kickstart.
-OLD_OWNER=$(sed -n 's|.*ghcr\.io/\([^/]*\)/.*|\1|p' disk_config/iso.toml | head -n1)
+# The owner appears as ghcr.io/<owner>/<image> in the ISO kickstart. The file
+# is optional (the rename loop below tolerates its absence), so its absence
+# must not kill the script here either - it just means the owner is unknown.
+OLD_OWNER=""
+if [ -f disk_config/iso.toml ]; then
+    OLD_OWNER=$(sed -n 's|.*ghcr\.io/\([^/]*\)/.*|\1|p' disk_config/iso.toml | head -n1)
+fi
+
+# The script can only rewrite an owner it can locate. When iso.toml names no
+# ghcr.io owner (or the file is gone), a requested owner change has nothing
+# to substitute - and completing anyway would leave the user believing the
+# owner was set when no file received it. Refuse rather than silently
+# ignore the argument.
+if [ -n "${NEW_OWNER}" ] && [ -z "${OLD_OWNER}" ]; then
+    echo "Error: cannot change the owner - no ghcr.io/<owner>/... reference in" >&2
+    echo "disk_config/iso.toml to read the current owner from. Set the owner" >&2
+    echo "by hand where it appears (search the repository for ghcr.io), or" >&2
+    echo "restore the iso.toml reference and run this script again." >&2
+    exit 1
+fi
+
+# Two values overlap when either occurs inside the other at word boundaries -
+# exactly the distinction the whole-word substitutions below cannot make.
+# Every dangerous pairing is checked through this one rule: new name vs new
+# owner, new name vs current owner, and current name vs current owner.
+overlaps() {  # $1, $2: non-empty words. True if they collide whole-word.
+    grep -q -i -w -F -e "$1" <<<"$2" || grep -q -i -w -F -e "$2" <<<"$1"
+}
+
+# Refuse to run on a repository whose current name and owner already overlap
+# (an older version of this script accepted e.g. image "zonk" with owner
+# "zonk-labs"): the name substitution would rewrite the owner inside
+# ghcr.io/<owner>/<image> along with the image, silently pointing the
+# workflows and signature policy at an account that does not exist. There is
+# no safe automated way out of that state.
+if [ -n "${OLD_OWNER}" ] && overlaps "${OLD_NAME}" "${OLD_OWNER}"; then
+    echo "Error: the current image name '${OLD_NAME}' and owner '${OLD_OWNER}'" >&2
+    echo "overlap as whole words - renaming would rewrite one inside the" >&2
+    echo "other. Hand-edit the current values apart first in the files this" >&2
+    echo "script manages (see FILES at the top), then rerun." >&2
+    exit 1
+fi
 
 # A repository can predate the collision check below with "donkey" already in
 # use as its name or owner. Renaming away from that cannot be done safely: the
@@ -157,6 +182,32 @@ if [ "${OLD_NAME,,}" = "donkey" ] || [ "${OLD_OWNER,,}" = "donkey" ]; then
     echo "     /etc/skel/.config/emacs/donkey, yardquit/donkey) untouched." >&2
     echo "  2. Compare build.sh section 1a and the README's Donkey section" >&2
     echo "     against the template and restore anything a past rename broke." >&2
+    exit 1
+fi
+
+# The new name must not overlap the new owner: "zonkul zonkul" (or "zonk"
+# with "zonk-labs") passes the file scan - neither value is in the files yet -
+# but the next rename could not tell the two apart inside
+# ghcr.io/<owner>/<image> and would rewrite both halves at once.
+if [ -n "${NEW_OWNER}" ] && overlaps "${NAME_LOWER}" "${NEW_OWNER}"; then
+    echo "Error: the image name '${NAME_LOWER}' and the owner '${NEW_OWNER}'" >&2
+    echo "overlap as whole words - the substitutions could not tell them" >&2
+    echo "apart in ghcr.io/<owner>/<image> references. Pick distinct values." >&2
+    exit 1
+fi
+
+# Nor may the new name overlap the CURRENT owner - the value the owner
+# substitution actually searches for, case-insensitively, after the name
+# pass has already written the new name into the files. An image "myorg-x"
+# under owner "myorg" would come out as "neworg-x" the moment the owner is
+# changed - in this very run if both arguments were given, otherwise on the
+# next owner change.
+if [ -n "${OLD_OWNER}" ] && overlaps "${NAME_LOWER}" "${OLD_OWNER}"; then
+    echo "Error: the new image name '${NAME_LOWER}' overlaps the current" >&2
+    echo "owner '${OLD_OWNER}' as a whole word - the owner substitution (in" >&2
+    echo "this run or a later one) would rewrite part of the image name." >&2
+    echo "Pick a name that does not contain the owner, or change the owner" >&2
+    echo "away from '${OLD_OWNER}' first." >&2
     exit 1
 fi
 

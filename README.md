@@ -64,9 +64,12 @@ Commented examples, off by default, cover packages that install into `/opt`
    The owner is always lowercased. One caveat: renaming is a whole-word text
    substitution across the repository, README prose included, so avoid naming
    your image after an ordinary English word that appears here. The script
-   enforces this where it would break builds rather than prose: a name or
-   owner that already appears in the build-critical files - `donkey`,
-   `emacs`, `build` and the like - is refused, with a list of the collisions.
+   refuses what would corrupt a later rename, listing the collisions it
+   found: an image name that already appears in the build-critical files
+   (`donkey`, `emacs`, `build` and the like), an owner that appears anywhere
+   in the rewritten files - README prose included, since the owner
+   substitution rewrites prose too - and a name and owner that overlap each
+   other as whole words.
 
 3. Choose a base image in `Containerfile`, and list the packages you want in
    `build_files/rpm_packages`.
