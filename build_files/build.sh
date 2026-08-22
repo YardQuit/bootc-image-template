@@ -319,6 +319,22 @@ systemctl enable bootc-fetch-apply-updates.timer
 # firing alongside the daily one. Persistent=true catches up after the machine
 # has been off over the scheduled time rather than skipping that day.
 
+# One unit is masked rather than enabled. systemd-remount-fs.service reads
+# /etc/fstab and remounts / with the options listed there - but on a bootc
+# system / is composefs, an overlay mount, and the kernel refuses to remount
+# an overlay. The unit therefore fails on every boot: a red entry in
+# "systemctl --failed" and a FAILED line during boot, with no functional
+# effect - root was already mounted correctly by the initramfs, and fstab
+# options for / are moot on a by-design read-only root. Known upstream since
+# the Fedora 42 composefs switch and unresolved (fedora-silverblue#605,
+# ostree#3193 - closed as "a systemd problem" - and fedora-iot#81); it
+# reproduces on stock Fedora Atomic images, nothing in this template causes
+# it. On composefs the unit can never do anything useful, so masking trades
+# a guaranteed failure for a clean skip. This is a workaround, not an
+# upstream-blessed fix: remove it if the trackers above resolve, or if you
+# ever build this image on a base that does not use composefs for /.
+systemctl mask systemd-remount-fs.service
+
 # Examples:
 # systemctl enable sshd.service
 # systemctl enable tailscaled.service   # needs a third-party repo, section 6
