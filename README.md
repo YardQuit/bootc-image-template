@@ -33,7 +33,8 @@ stands, and every default below is a plain, commented line in
 
 Commented examples, off by default, cover packages that install into `/opt`
 (1Password, MEGAsync), COPR repos, third-party repos, requiring a YubiKey for
-`sudo`, changing the firewalld default zone, and rebranding `/etc/os-release`.
+`sudo`, changing the firewalld default zone, rebranding `/etc/os-release`, and
+signature-verified updates (see "Signing" below).
 
 ## What you need
 
@@ -379,58 +380,30 @@ cosign verify --key cosign.pub ghcr.io/myorg/myimage:latest
 
 Signing only helps if the machine checks the signature before installing an
 update. That is off by default: `bootc upgrade` will happily pull an unsigned
-image unless you tell it otherwise. To turn it on, add three things to the
-image - none of this is in the template, because it only makes sense once you
-actually have a key.
+image unless you tell it otherwise. Turning it on takes three things, and all
+three already sit in the template - two of them commented out, because they
+only make sense once you actually have a key.
 
-1. **Ship the public key.** Add to the `ctx` stage in `Containerfile`:
+1. **Ship the public key and require a valid signature.** Uncomment section
+   9c in `build_files/build.sh` and the `COPY cosign.pub` line in the `ctx`
+   stage of `Containerfile` - they work as a pair, and the build stops on the
+   missing key file if you uncomment one without the other. The section
+   installs the key into the image and merges a `sigstoreSigned` rule for
+   your repository into the `/etc/containers/policy.json` the base already
+   provides (merged rather than replaced, so the defaults that let every
+   other image be pulled survive). `scripts/set-image-name.sh` keeps the
+   repository and key name in it up to date, and a check at the end of the
+   section fails the build if the rule ever stops matching your image.
 
-   ```dockerfile
-   COPY cosign.pub /cosign.pub
-   ```
-
-   and install it in `build_files/build.sh`:
-
-   ```bash
-   install -Dm0644 /ctx/cosign.pub /etc/pki/containers/myimage.pub
-   ```
-
-2. **Let containers/image look for the signature.** Already done - the template
-   ships
+2. **Let containers/image look for the signature.** Already active - the
+   template ships
    `build_files/sysfiles/etc/containers/registries.d/sigstore-attachments.yaml`,
    and `scripts/set-image-name.sh` keeps the repository in it up to date. It is
    inert on its own: it only says "look for an attachment", never "require one",
-   so unsigned images keep pulling normally until you add step 3.
+   so unsigned images keep pulling normally until step 1 is uncommented.
 
    (containers/image reads this only from `/etc/containers/registries.d` - there
    is no `/usr` location, so it has to ship under `sysfiles/etc/`.)
-
-3. **Require a valid signature.** This one cannot be shipped as a file: it has
-   to *merge* into the `/etc/containers/policy.json` the base image already
-   provides, and dropping a replacement into `sysfiles/` would overwrite that
-   file wholesale, discarding the defaults that let every other image be pulled.
-   So add this to `build_files/build.sh` instead:
-
-   ```bash
-   python3 - <<'POLICY'
-   import json, pathlib
-   path = pathlib.Path("/etc/containers/policy.json")
-   policy = json.loads(path.read_text())
-   policy.setdefault("transports", {}).setdefault("docker", {})[
-       "ghcr.io/myorg/myimage"
-   ] = [
-       {
-           "type": "sigstoreSigned",
-           "keyPath": "/etc/pki/containers/myimage.pub",
-           # A cosign signature carries only a repository, never a tag, so
-           # matchRepository is the only identity check that can succeed. The
-           # default (matchRepoDigestOrExact) rejects every signature.
-           "signedIdentity": {"type": "matchRepository"},
-       }
-   ]
-   path.write_text(json.dumps(policy, indent=4) + "\n")
-   POLICY
-   ```
 
 Two things worth knowing before you enable this:
 

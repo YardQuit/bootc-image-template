@@ -528,6 +528,60 @@ fi
 ## one dracut just wrote.
 lsinitrd -m "${INITRAMFS}" | tr ' ' '\n' | grep -qx plymouth
 
+### 9c. Verify our own updates ##############################################
+##
+## Ready to use once you have a signing key - uncomment the commands below
+## AND the "COPY cosign.pub" line in the Containerfile, or the build stops
+## at the missing /ctx/cosign.pub.
+##
+## The workflow signs each published image when the SIGNING_SECRET secret is
+## set, but signing alone changes nothing on the machine: "bootc upgrade"
+## pulls unsigned images happily unless the system is told to check. That
+## takes three things: the public key in the image, a registries.d entry
+## telling containers/image to look for a sigstore attachment (shipped in
+## sysfiles, inert on its own), and the policy.json rule below that turns
+## "look" into "require". The README's Signing section tells the whole
+## story, including how to create the key pair.
+##
+## Before you enable it, know what you are switching on:
+##  * Verification becomes MANDATORY for this repository. If signing ever
+##    breaks, "bootc upgrade" refuses to install rather than accept an
+##    unverified image - which is the point, but a broken signing step then
+##    blocks updates until fixed.
+##  * The signature must stay in the format containers/image can read -
+##    build.yml pins cosign to the 2.x series for exactly that reason.
+##
+# install -Dm0644 /ctx/cosign.pub /etc/pki/containers/myimage.pub
+##
+## policy.json already exists in the base image, so merge into it rather
+## than ship a replacement through sysfiles - overwriting it wholesale would
+## drop the defaults that let every other image still be pulled.
+##
+# python3 - <<'POLICY'
+# import json, pathlib
+# path = pathlib.Path("/etc/containers/policy.json")
+# policy = json.loads(path.read_text())
+# policy.setdefault("transports", {}).setdefault("docker", {})[
+#     "ghcr.io/myorg/myimage"
+# ] = [
+#     {
+#         "type": "sigstoreSigned",
+#         "keyPath": "/etc/pki/containers/myimage.pub",
+#         # A cosign signature carries only a repository, never a tag, so
+#         # matchRepository is the only identity check that can succeed.
+#         # The default (matchRepoDigestOrExact) rejects every signature.
+#         "signedIdentity": {"type": "matchRepository"},
+#     }
+# ]
+# path.write_text(json.dumps(policy, indent=4) + "\n")
+# POLICY
+##
+## Prove the rule really landed for this image's repository - a rename that
+## only half-updated these lines would otherwise ship a policy that guards
+## the wrong name while the build stays green.
+##
+# python3 -c 'import json; p = json.load(open("/etc/containers/policy.json")); assert "ghcr.io/myorg/myimage" in p["transports"]["docker"], "policy rule missing"'
+
 ### 10. Directories that must exist at boot ##################################
 ##
 ## /var is reset on every deployment, so a directory created during the build

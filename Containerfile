@@ -8,6 +8,10 @@
 ## Stage 1: build context. FROM scratch means "empty image" - it only carries files.
 FROM scratch AS ctx
 COPY build_files /
+## Signature-verified updates (build.sh section 9c) need the public key in the
+## build context - uncomment together with that section. Requires a committed
+## cosign.pub; the README's Signing section shows how to create the key pair.
+# COPY cosign.pub /cosign.pub
 
 ## Stage 2: the image itself.
 ##
