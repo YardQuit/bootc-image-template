@@ -40,8 +40,8 @@ chmod -R +x /etc/cron.daily 2>/dev/null || true
 ## move to a newer donkey, look up the commit you want (ls-remote answers
 ## for a branch or a tag), hash it, and put both values below:
 ##
-##   git ls-remote https://github.com/YardQuit/donkey master
-##   curl -fsSL https://raw.githubusercontent.com/YardQuit/donkey/<commit>/donkey.el | sha256sum
+##   COMMIT=$(git ls-remote https://github.com/YardQuit/donkey master | awk '{print $1}')
+##   echo $COMMIT; curl -fsSL https://raw.githubusercontent.com/YardQuit/donkey/$COMMIT/donkey.el | sha256sum
 DONKEY_COMMIT="a9f02f78f3a91c3d23968ec15cfd52920355dc04"   # 1.3.3
 DONKEY_SHA256="5fbec36ff782187605a558000b3a3d5c404ee4f4bc69b4e37bfa80aad6757007"
 
