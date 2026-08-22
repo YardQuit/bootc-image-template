@@ -171,6 +171,19 @@ jobs:
           if [ "${ISO_SRC}" != "output/${ISO_NAME}" ]; then
             mv "${ISO_SRC}" "output/${ISO_NAME}"
           fi
+
+          # bootc-image-builder also writes manifest-iso.json - the osbuild
+          # manifest the ISO was built from, handy when debugging a build.
+          # It travels to S3 with everything else in output/, so give it the
+          # ISO's name too: several projects uploading into the same bucket
+          # would otherwise each write "manifest-iso.json" and overwrite one
+          # another's. Fedora-MYIMAGE-Atomic-44….iso gets
+          # Fedora-MYIMAGE-Atomic-44….manifest-iso.json alongside it.
+          for manifest in output/manifest-*.json; do
+            [ -f "${manifest}" ] || continue
+            mv "${manifest}" "output/${ISO_NAME%.iso}.$(basename "${manifest}")"
+          done
+
           find output -mindepth 1 -type d -empty -delete
 
           ls -lh output
