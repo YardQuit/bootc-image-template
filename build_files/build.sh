@@ -86,20 +86,20 @@ echo "${DONKEY_SHA256}  /etc/skel/.config/emacs/donkey/donkey.el" | sha256sum -c
 ## inside the image, where "bootc upgrade" manages it like everything else.
 ## The trade-off: /opt is then read-only on the running system, so you can no
 ## longer drop files into /opt by hand. Uncomment to enable:
-##
+
 # if [ -L /opt ]; then
 #     rm /opt
 #     mkdir /opt
 # fi
-##
+
 ## Some applications insist on writing inside their own directory. Move those
 ## directories to /var and leave a symlink behind - this is what the bootc
 ## documentation recommends:
-##
+
 # dnf5 -y install examplepkg
 # mv /opt/examplepkg/logs /var/log/examplepkg
 # ln -sr /var/log/examplepkg /opt/examplepkg/logs
-##
+
 ## A directory under /var that has to exist on a fresh machine is best created
 ## at boot by systemd-tmpfiles instead of here. Add the file
 ## build_files/sysfiles/usr/lib/tmpfiles.d/examplepkg.conf containing:
@@ -128,16 +128,16 @@ echo "${DONKEY_SHA256}  /etc/skel/.config/emacs/donkey/donkey.el" | sha256sum -c
 ## so it allocates them from the human range (1000, 1001) - the same range the
 ## first real user gets. Creating them as system groups first means the package
 ## reuses them, and the setgid helper binaries end up owned by a system group.
-##
+
 # groupadd -r onepassword
 # groupadd -r onepassword-mcp
-##
+
 # rpm --import https://downloads.1password.com/linux/keys/1password.asc
 # dnf5 -y install https://downloads.1password.com/linux/rpm/stable/x86_64/1password-latest.rpm
 # ## The package drops in a dnf repository for its own auto-updates. An image
 # ## updates when you rebuild it, so the file has no purpose here.
 # rm -f /etc/yum.repos.d/1password.repo
-##
+
 ## Two things the package's install step does that are worth knowing about:
 ##
 ##  * It writes /usr/share/polkit-1/actions/com.1password.1Password.policy from
@@ -158,11 +158,11 @@ echo "${DONKEY_SHA256}  /etc/skel/.config/emacs/donkey/donkey.el" | sha256sum -c
 ##
 ##    Leave the command commented out if you have not created that file: the
 ##    build stops on a missing source.
-##
+
 # install -Dm0644 \
 #     /ctx/sysfiles/usr/share/polkit-1/actions/com.1password.1Password.policy \
 #     /usr/share/polkit-1/actions/com.1password.1Password.policy
-##
+
 ##  * It creates the "onepassword" and "onepassword-mcp" groups, sets the setgid
 ##    bit on two helper binaries and the setuid bit on chrome-sandbox. That all
 ##    happens during the build and travels in the image, which is what you want.
@@ -193,23 +193,23 @@ echo "${DONKEY_SHA256}  /etc/skel/.config/emacs/donkey/donkey.el" | sha256sum -c
 ## tolerate a non-zero exit and assert afterwards that the package really landed
 ## - a genuine download or dependency failure still stops the build. The same
 ## shape works for any vendor RPM with a scriptlet that misbehaves in a container.
-##
+
 # dnf5 -y install https://mega.nz/linux/repo/Fedora_44/x86_64/megasync-Fedora_44.x86_64.rpm \
 #     || echo "megasync: dnf5 exited non-zero (expected) - verifying"
 # rpm -q megasync
-##
+
 ## The inotify limit belongs in a sysctl.d drop-in applied at boot instead, e.g.
 ## build_files/sysfiles/usr/lib/sysctl.d/90-megasync-inotify.conf containing:
 ##
 ##   fs.inotify.max_user_watches = 524288
-##
+
 # ## As with 1Password: a dnf repository for auto-updates, of no use in an image.
 # rm -f /etc/yum.repos.d/megasync.repo
-##
+
 ## The command line client is published the same way, if you prefer it:
-##
+
 # dnf5 -y install https://mega.nz/linux/repo/Fedora_44/x86_64/megacmd-Fedora_44.x86_64.rpm
-##
+
 ## Note that MEGAsync is a Qt5 application. On a GNOME or COSMIC image the Qt5
 ## libraries are not installed, so expect dnf to pull in a sizeable dependency
 ## tree along with it.
@@ -236,29 +236,31 @@ fi
 rm -f /etc/skel/.emacs
 
 ## Example: install a whole package group instead of single packages
+
 # dnf5 group install --skip-unavailable -y cosmic-desktop
 
 ### 4. Optional: packages from COPR repos ###################################
 ##
 ## Enable the repo, install, then disable it again so the finished image does
 ## not keep pulling from it at runtime.
-##
+
 # dnf5 -y copr enable atim/starship
 # dnf5 -y install starship
 # dnf5 -y copr disable atim/starship
 
 ### 5. Optional: RPMs from a URL ############################################
-##
+
 # dnf5 can install straight from a URL - no need to download first, and no
+
 ## repository on the finished system.
-##
+
 # dnf5 -y install https://example.com/downloads/some-package.x86_64.rpm
-##
+
 ## Sections 2a and 2b are complete, ready-to-uncomment examples of this
 ## (1Password and MEGAsync).
 
 ### 6. Optional: third-party repos ##########################################
-##
+
 # dnf5 config-manager addrepo --from-repofile=https://example.com/example.repo
 # dnf5 -y install example-package
 
@@ -349,6 +351,7 @@ systemctl enable bootc-fetch-apply-updates.timer
 systemctl mask systemd-remount-fs.service
 
 ## Examples:
+
 # systemctl enable sshd.service
 # systemctl enable tailscaled.service   # needs a third-party repo, section 6
 # systemctl --global enable some-user-unit.service   # for every user session
@@ -366,7 +369,7 @@ systemctl mask systemd-remount-fs.service
 ## the symlink with "sed -i" is no good either: that replaces the symlink with a
 ## regular file. Resolve it first, then edit the real target, then check the
 ## result - for a firewall setting a silent no-op is the worst outcome.
-##
+
 # FIREWALLD_CONF="$(readlink -f /etc/firewalld/firewalld.conf)"
 # cp "${FIREWALLD_CONF}" "${FIREWALLD_CONF}.bak"
 # if grep -q '^DefaultZone=' "${FIREWALLD_CONF}"; then
@@ -375,7 +378,7 @@ systemctl mask systemd-remount-fs.service
 #     echo 'DefaultZone=drop' >> "${FIREWALLD_CONF}"
 # fi
 # firewall-offline-cmd --get-default-zone | grep -qx drop
-##
+
 ## Example: require a YubiKey for sudo (pam_yubico is in rpm_packages already).
 ##
 ## PAM treats a missing "required" module as an authentication failure, so if
@@ -385,7 +388,7 @@ systemctl mask systemd-remount-fs.service
 ##
 ## You must also enrol a key (ykpamcfg -2) before booting the image, or sudo will
 ## reject you; /etc/pam.d/sudo.bak is left behind for recovery.
-##
+
 # if ! find /usr/lib64/security /usr/lib/security -name pam_yubico.so -print -quit 2>/dev/null | grep -q .; then
 #     echo "ERROR: pam_yubico.so not found - refusing to edit /etc/pam.d/sudo." >&2
 #     exit 1
@@ -393,7 +396,7 @@ systemctl mask systemd-remount-fs.service
 # cp /etc/pam.d/sudo /etc/pam.d/sudo.bak
 # sed -i '/PAM-1.0/a\auth       required     pam_yubico.so mode=challenge-response' /etc/pam.d/sudo
 
-### 9a. Optional: identify this image in /etc/os-release #####################
+### 9a. Identify this image in /etc/os-release ##############################
 ##
 ## os-release(5) is what hostnamectl, the desktop's About page, fastfetch, the
 ## bootloader entries and abrt read to decide what this machine is running.
@@ -402,7 +405,10 @@ systemctl mask systemd-remount-fs.service
 ## over: this is not that image, and bug reports about it should not land in
 ## their tracker.
 ##
-## The example below follows the convention each field already uses:
+## Enabled by default - the values below are rewritten by set-image-name.sh,
+## so after the rename in the Quick start they already point at your image
+## and repository. Delete the section to keep the base's identity instead.
+## Each field follows the convention it already uses:
 ##   VARIANT / VARIANT_ID   the edition on top of the distribution, so
 ##                          "COSMIC Atomic" / cosmic-atomic becomes
 ##                          "MYIMAGE Atomic" / myimage-atomic
@@ -425,60 +431,60 @@ systemctl mask systemd-remount-fs.service
 ## symlink replaces the symlink with a regular file, so resolve it first - the
 ## same trap as firewalld.conf above.
 ##
-# OS_RELEASE="$(readlink -f /etc/os-release)"
-# cp "${OS_RELEASE}" "${OS_RELEASE}.bak"
+OS_RELEASE="$(readlink -f /etc/os-release)"
+cp "${OS_RELEASE}" "${OS_RELEASE}.bak"
 ##
 ## Substitute a key if the base defines it, append it if not: VARIANT usually
 ## exists but IMAGE_ID does not, and a plain "sed -i" would silently do nothing
 ## for the second kind.
 ##
-# os_release_set() {
-#     if grep -q "^${1}=" "${OS_RELEASE}"; then
-#         sed -i "s|^${1}=.*|${1}=${2}|" "${OS_RELEASE}"
-#     else
-#         printf '%s=%s\n' "${1}" "${2}" >> "${OS_RELEASE}"
-#     fi
-# }
+os_release_set() {
+    if grep -q "^${1}=" "${OS_RELEASE}"; then
+        sed -i "s|^${1}=.*|${1}=${2}|" "${OS_RELEASE}"
+    else
+        printf '%s=%s\n' "${1}" "${2}" >> "${OS_RELEASE}"
+    fi
+}
 ##
 ## A Fedora base's VERSION reads "44.20260819.0 (COSMIC Atomic)": keep the build
 ## number, drop its edition label. Read the values through a subshell so the
 ## sourced variables do not leak into the rest of this script.
 ##
-# OS_NAME="$(. "${OS_RELEASE}"; printf '%s' "${NAME}")"
-# OS_BUILD="$(. "${OS_RELEASE}"; printf '%s' "${VERSION%% *}")"
-# [ -n "${OS_BUILD}" ] || OS_BUILD="$(. "${OS_RELEASE}"; printf '%s' "${VERSION_ID}")"
+OS_NAME="$(. "${OS_RELEASE}"; printf '%s' "${NAME}")"
+OS_BUILD="$(. "${OS_RELEASE}"; printf '%s' "${VERSION%% *}")"
+[ -n "${OS_BUILD}" ] || OS_BUILD="$(. "${OS_RELEASE}"; printf '%s' "${VERSION_ID}")"
 ##
-# os_release_set VARIANT           "\"MYIMAGE Atomic\""
-# os_release_set VARIANT_ID        "myimage-atomic"
-# os_release_set VERSION           "\"${OS_BUILD} (MYIMAGE Atomic)\""
-# os_release_set PRETTY_NAME       "\"${OS_NAME} ${OS_BUILD} (MYIMAGE Atomic)\""
-# os_release_set DEFAULT_HOSTNAME  "\"myimage\""
-# os_release_set HOME_URL          "\"https://github.com/myorg/myimage\""
-# os_release_set DOCUMENTATION_URL "\"https://github.com/myorg/myimage\""
-# os_release_set SUPPORT_URL       "\"https://github.com/myorg/myimage/issues\""
-# os_release_set BUG_REPORT_URL    "\"https://github.com/myorg/myimage/issues\""
-# os_release_set IMAGE_ID          "myimage"
-# os_release_set IMAGE_VERSION     "\"${OS_BUILD}\""
+os_release_set VARIANT           "\"MYIMAGE Atomic\""
+os_release_set VARIANT_ID        "myimage-atomic"
+os_release_set VERSION           "\"${OS_BUILD} (MYIMAGE Atomic)\""
+os_release_set PRETTY_NAME       "\"${OS_NAME} ${OS_BUILD} (MYIMAGE Atomic)\""
+os_release_set DEFAULT_HOSTNAME  "\"myimage\""
+os_release_set HOME_URL          "\"https://github.com/myorg/myimage\""
+os_release_set DOCUMENTATION_URL "\"https://github.com/myorg/myimage\""
+os_release_set SUPPORT_URL       "\"https://github.com/myorg/myimage/issues\""
+os_release_set BUG_REPORT_URL    "\"https://github.com/myorg/myimage/issues\""
+os_release_set IMAGE_ID          "myimage"
+os_release_set IMAGE_VERSION     "\"${OS_BUILD}\""
 ##
 ## On a Fedora base, abrt uses these to file crashes against Fedora's Bugzilla.
 ## Nobody there can act on a crash in an image they did not build, so drop them.
 ##
-# sed -i '/^REDHAT_BUGZILLA_PRODUCT=/d
-# /^REDHAT_BUGZILLA_PRODUCT_VERSION=/d
-# /^REDHAT_SUPPORT_PRODUCT=/d
-# /^REDHAT_SUPPORT_PRODUCT_VERSION=/d' "${OS_RELEASE}"
+sed -i '/^REDHAT_BUGZILLA_PRODUCT=/d
+/^REDHAT_BUGZILLA_PRODUCT_VERSION=/d
+/^REDHAT_SUPPORT_PRODUCT=/d
+/^REDHAT_SUPPORT_PRODUCT_VERSION=/d' "${OS_RELEASE}"
 ##
 ## Prove the file still parses and that the edits landed. A malformed os-release
 ## breaks a great deal more than the About dialog, and an edit that quietly
 ## matched nothing is the failure mode this whole section is built to avoid.
 ##
-# ( . "${OS_RELEASE}"
-#   [ "${VARIANT_ID:-}" = "myimage-atomic" ] || { echo "os-release: VARIANT_ID not applied" >&2; exit 1; }
-#   [ "${IMAGE_ID:-}" = "myimage" ]          || { echo "os-release: IMAGE_ID not applied" >&2; exit 1; }
-#   case "${PRETTY_NAME:-}" in
-#       *"MYIMAGE Atomic"*) ;;
-#       *) echo "os-release: PRETTY_NAME not applied" >&2; exit 1 ;;
-#   esac )
+( . "${OS_RELEASE}"
+  [ "${VARIANT_ID:-}" = "myimage-atomic" ] || { echo "os-release: VARIANT_ID not applied" >&2; exit 1; }
+  [ "${IMAGE_ID:-}" = "myimage" ]          || { echo "os-release: IMAGE_ID not applied" >&2; exit 1; }
+  case "${PRETTY_NAME:-}" in
+      *"MYIMAGE Atomic"*) ;;
+      *) echo "os-release: PRETTY_NAME not applied" >&2; exit 1 ;;
+  esac )
 ##
 ## NAME and the leading field of VERSION are left untouched, so the ISO name the
 ## workflow derives from them is unaffected.
@@ -550,13 +556,13 @@ lsinitrd -m "${INITRAMFS}" | tr ' ' '\n' | grep -qx plymouth
 ##    blocks updates until fixed.
 ##  * The signature must stay in the format containers/image can read -
 ##    build.yml pins cosign to the 2.x series for exactly that reason.
-##
+
 # install -Dm0644 /ctx/cosign.pub /etc/pki/containers/myimage.pub
-##
+
 ## policy.json already exists in the base image, so merge into it rather
 ## than ship a replacement through sysfiles - overwriting it wholesale would
 ## drop the defaults that let every other image still be pulled.
-##
+
 # python3 - <<'POLICY'
 # import json, pathlib
 # path = pathlib.Path("/etc/containers/policy.json")
@@ -575,11 +581,11 @@ lsinitrd -m "${INITRAMFS}" | tr ' ' '\n' | grep -qx plymouth
 # ]
 # path.write_text(json.dumps(policy, indent=4) + "\n")
 # POLICY
-##
+
 ## Prove the rule really landed for this image's repository - a rename that
 ## only half-updated these lines would otherwise ship a policy that guards
 ## the wrong name while the build stays green.
-##
+
 # python3 -c 'import json; p = json.load(open("/etc/containers/policy.json")); assert "ghcr.io/myorg/myimage" in p["transports"]["docker"], "policy rule missing"'
 
 ### 10. Directories that must exist at boot ##################################

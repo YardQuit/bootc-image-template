@@ -31,10 +31,15 @@ stands, and every default below is a plain, commented line in
   `helix`, `htop`, `neovim`, `podman-compose`, `ripgrep`, `tmux`, `zoxide` and
   a few more, all in one flat alphabetical list.
 
+- **The image identifies as itself.** `/etc/os-release` is rebranded with your
+  image's name and repository URLs (kept in step by `set-image-name.sh`), so
+  About pages and bug-report links point at you, not at the base - see "How
+  the image identifies itself" below.
+
 Commented examples, off by default, cover packages that install into `/opt`
 (1Password, MEGAsync), COPR repos, third-party repos, requiring a YubiKey for
-`sudo`, changing the firewalld default zone, rebranding `/etc/os-release`, and
-signature-verified updates (see "Signing" below).
+`sudo`, changing the firewalld default zone, and signature-verified updates
+(see "Signing" below).
 
 ## What you need
 
@@ -181,10 +186,13 @@ Background: [bootc filesystem](https://bootc.dev/bootc/filesystem.html) and
 
 ## How the image identifies itself
 
-Out of the box the image reports itself as whatever base it was built from -
 `hostnamectl`, the desktop's About page, fastfetch and the bootloader entries
-all read `/etc/os-release`, and nothing in this template changes it. Section 9a
-of `build_files/build.sh` is a commented example that rebrands it:
+all read `/etc/os-release`, and left alone it says whatever the base says and
+points every support URL at that project's tracker. Section 9a of
+`build_files/build.sh` therefore rebrands it by default - the names come from
+the same placeholders `set-image-name.sh` rewrites, so after the Quick start
+rename the image already identifies as yours (delete the section to keep the
+base's identity instead):
 
 ```
 VERSION="44.20260819.0 (MYIMAGE Atomic)"
@@ -198,9 +206,11 @@ HOME_URL / DOCUMENTATION_URL / SUPPORT_URL / BUG_REPORT_URL -> your repository
 ```
 
 The version is not hardcoded: it is read back out of the base's own `VERSION`,
-so it follows the base forward on its own. The example also deletes the
+so it follows the base forward on its own. The section also deletes the
 `REDHAT_BUGZILLA_*` and `REDHAT_SUPPORT_*` keys, so `abrt` stops offering to
-file crashes in your image against Fedora's Bugzilla.
+file crashes in your image against Fedora's Bugzilla, and it verifies its own
+edits - a rename that half-missed these values fails the build rather than
+shipping an image with a mixed identity.
 
 `NAME`, `ID`, `VERSION_ID`, `CPE_NAME`, `LOGO` and `ANSI_COLOR` are left as the
 base set them. The distribution underneath really is Fedora (or CentOS), and
