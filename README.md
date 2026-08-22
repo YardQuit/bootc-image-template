@@ -317,22 +317,40 @@ remove both, also drop `emacs` from `rpm_packages`.
 
 Three things are deliberate about the layout:
 
-- **`~/.emacs.d` is never created.** Because `~/.config/emacs` exists before
-  the first Emacs start, Emacs adopts it as its one directory - packages,
-  the `auto-save-list/` session directory and eln-cache land there too (the
+- **`~/.emacs.d` is never created - on an account that starts with this
+  configuration.** Because `~/.config/emacs` exists before the first Emacs
+  start, Emacs adopts it as its one directory - packages, the
+  `auto-save-list/` session directory and eln-cache land there too (the
   `#file#` auto-saves themselves sit next to the file being edited, as in
-  stock Emacs). The reverse also holds: a
-  hand-created `~/.emacs`, `~/.emacs.el` or `~/.emacs.d` takes precedence and
-  disables this configuration, so don't.
+  stock Emacs). This only works because the build deletes the starter
+  `/etc/skel/.emacs` that Fedora's `emacs-common` package ships: `~/.emacs`
+  outranks `~/.config/emacs`, so left in place it would win in every new
+  account and this configuration would never load. The same applies by
+  hand: a `~/.emacs`, `~/.emacs.el` or `~/.emacs.d` you create yourself
+  takes precedence and disables this configuration, so don't.
 - **Customize output stays out of `config.el`.** `custom-file` is left unset
   on purpose, which makes Customize save its `custom-set-variables` blocks
   into `init.el` - machine-written forms in one file, hand-written
   configuration in the other. Note that Customize's values are applied after
   `config.el`, so they win when both set the same variable.
-- **`/etc/skel` only reaches new accounts.** Users created before a machine
-  switched to this image keep their existing home directories untouched; copy
-  the files from `/etc/skel/.config/emacs/` by hand if you want the setup in
-  an existing account.
+- **`/etc/skel` only reaches new accounts** - ones created after the machine
+  runs this image, the ISO's install-time user included. An account that
+  existed before keeps its home untouched, and there the guarantee above
+  inverts itself: with no `~/.config/emacs` present, Emacs falls back to
+  `~/.emacs` as the init file it would create and `~/.emacs.d` as its
+  directory - the first session makes `~/.emacs.d`, the first Customize save
+  (Donkey's terminal-denylist command is one) writes `~/.emacs`, and once
+  either exists it permanently outranks `~/.config/emacs`. To move such an
+  account onto this configuration, salvage anything you keep in those files,
+  then:
+
+  ```bash
+  rm -rf ~/.emacs ~/.emacs.el ~/.emacs.d
+  cp -r /etc/skel/.config/emacs ~/.config/
+  ```
+
+  The next Emacs start adopts `~/.config/emacs` and nothing recreates the
+  old paths.
 
 `wl-clipboard` is installed alongside, so Donkey's clipboard integration works
 in terminal frames (`emacs -nw`, `emacsclient -t`) on Wayland; graphical Emacs

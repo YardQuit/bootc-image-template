@@ -226,6 +226,15 @@ if [ -n "${PACKAGES}" ]; then
     dnf5 install --skip-unavailable -y ${PACKAGES}
 fi
 
+## Fedora's emacs-common ships a starter /etc/skel/.emacs. It arrives here -
+## after section 1 copied this image's /etc/skel/.config/emacs into place -
+## and ~/.emacs outranks ~/.config/emacs in Emacs's init search, so every
+## account created from this skel (the installer's included) would load the
+## stock file instead: Donkey never enables, and the first session grows an
+## ~/.emacs.d. Remove it so new accounts get the configuration this image
+## actually ships. Harmless when emacs is dropped from rpm_packages.
+rm -f /etc/skel/.emacs
+
 ## Example: install a whole package group instead of single packages
 # dnf5 group install --skip-unavailable -y cosmic-desktop
 
