@@ -42,8 +42,8 @@ chmod -R +x /etc/cron.daily 2>/dev/null || true
 ##
 ##   git ls-remote https://github.com/YardQuit/donkey master
 ##   curl -fsSL https://raw.githubusercontent.com/YardQuit/donkey/<commit>/donkey.el | sha256sum
-DONKEY_COMMIT="7ba0ede7f179a90bb6079e24d99eb95c676f92c1"   # 1.3.2
-DONKEY_SHA256="cd929da01006fe6e7abac022e25957e4eadd761cca8bf0b9638a23e68f9ca96c"
+DONKEY_COMMIT="a9f02f78f3a91c3d23968ec15cfd52920355dc04"   # 1.3.3
+DONKEY_SHA256="5fbec36ff782187605a558000b3a3d5c404ee4f4bc69b4e37bfa80aad6757007"
 
 ## The directory is created explicitly: curl's --create-dirs would make it
 ## 0750, and /etc/skel content must be world-readable or copying it by hand
