@@ -38,21 +38,32 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
-      # The rename script rewrites every image reference in the repository with
-      # whole-word text substitution. When one of its guards is wrong it does
-      # not crash - it writes a plausible-looking file, the build stays green,
-      # and the first symptom is a machine that cannot upgrade. The tests cover
-      # the guards; they need no network, no podman and no root.
-      - name: Rename script tests
-        run: ./tests/set-image-name.test.sh
-
-      # The disk.toml guard refuses to build a disk image while the password is
-      # still the placeholder. Its first version matched "changeme" anywhere in
-      # the file, including the comments that explain the placeholder, so it
-      # refused every disk build forever - a guard that can never be satisfied
-      # fails as quietly as one that never fires.
-      - name: Disk password guard tests
-        run: ./tests/build-disk-guard.test.sh
+      # Every tests/*.test.sh there is. They cover the two scripts that fail
+      # quietly rather than loudly: the rename script, which rewrites every
+      # image reference by whole-word substitution and on a wrong guard writes
+      # a plausible-looking file rather than crashing; and the disk.toml
+      # password guard, whose first version could never be satisfied at all.
+      # None of them needs the network, podman or root.
+      #
+      # Discovered rather than listed, so that "rm -rf tests/" is the entire
+      # operation and leaves nothing red behind. These test the template's own
+      # scripts, which a project built from it runs but does not edit, so
+      # deleting the directory is a perfectly reasonable first thing to do -
+      # see "Removing the tests" in README.md. Adding a suite needs no edit
+      # here either.
+      - name: Tests
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          suites=(tests/*.test.sh)
+          if [ "${#suites[@]}" -eq 0 ]; then
+            echo "No tests/ directory in this repository - nothing to run."
+            exit 0
+          fi
+          for suite in "${suites[@]}"; do
+            echo "=== ${suite} ==="
+            "${suite}"
+          done
 
       # ShellCheck is preinstalled on the GitHub runner images; the fallback is
       # for self-hosted runners that do not carry it.
@@ -72,8 +83,12 @@ jobs:
             sudo apt-get update -qq
             sudo apt-get install -y shellcheck
           fi
-          shellcheck --severity=warning --exclude=SC1090 \
-            build_files/build.sh scripts/*.sh tests/*.sh
+          # nullglob for the same reason as above: with tests/ deleted the
+          # glob must vanish rather than reach ShellCheck as a literal path
+          # that does not exist.
+          shopt -s nullglob
+          files=(build_files/build.sh scripts/*.sh tests/*.sh)
+          shellcheck --severity=warning --exclude=SC1090 "${files[@]}"
 
       # None of these files is read by anything until much later: the workflows
       # by GitHub, the disk_config ones halfway through an ISO build, and the

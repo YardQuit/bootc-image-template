@@ -292,11 +292,15 @@ unaffected: there Anaconda asks for a user at install time.
 ## Checks
 
 ```bash
-./tests/set-image-name.test.sh      # the rename script's guards
-./tests/build-disk-guard.test.sh    # the disk.toml placeholder-password guard
+for t in tests/*.test.sh; do "${t}"; done
 shellcheck --severity=warning --exclude=SC1090 \
     build_files/build.sh scripts/*.sh tests/*.sh
 ```
+
+| Suite | Covers |
+| --- | --- |
+| `tests/set-image-name.test.sh` | The rename script's guards. |
+| `tests/build-disk-guard.test.sh` | The `disk.toml` placeholder-password guard. |
 
 `.github/workflows/checks.yml` runs all of them on every push and pull request,
 along with a parse of every YAML and TOML file in the repository. It needs no
@@ -318,6 +322,31 @@ placeholder is the half that is obvious to test; letting a correctly configured
 file through is the half that breaks silently, and did - the first version
 matched `changeme` anywhere in the file, including the comments explaining what
 the placeholder is, so it refused every disk build forever.
+
+### Removing the tests
+
+These test the template's own scripts - `set-image-name.sh` and
+`build-disk.sh` - which your project runs but does not edit. That makes them
+the template's furniture rather than yours, and deleting them is a reasonable
+first thing to do in a new project:
+
+```bash
+rm -rf tests/
+```
+
+That is the whole operation. `checks.yml` discovers the suites rather than
+naming them, so with the directory gone it reports "nothing to run" and stays
+green; the ShellCheck step drops them from its file list the same way. No
+workflow edit, no red build.
+
+GitHub copies the entire default branch when a repository is created from a
+template - there is no `.templateignore` and no way to hold a directory back -
+so shipping them and making them easy to delete is as close as the mechanism
+allows.
+
+Worth keeping if you ever copy a newer `set-image-name.sh` down from upstream:
+the tests are what confirm its guards still behave in your tree, and that
+script fails quietly when it fails at all.
 
 ## ISOs in CI
 
