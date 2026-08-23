@@ -130,10 +130,6 @@ done
 
 check "--check catches them"              "$(run "${STALE}" --check)"        "1"
 
-# Each file's matches are collected separately, so they have to be joined with
-# a newline: a command substitution strips trailing newlines, and appending one
-# file's output straight onto the previous one runs two matches into a single
-# unreadable line.
 # Three different files are stale here, so the listing crosses two file
 # boundaries. Every match has to start its own line: each file is grepped
 # separately, and a command substitution strips trailing newlines, so appending

@@ -60,7 +60,10 @@ jobs:
       - name: ShellCheck
         run: |
           set -euo pipefail
-          command -v shellcheck >/dev/null || sudo apt-get install -y shellcheck
+          if ! command -v shellcheck >/dev/null; then
+            sudo apt-get update -qq
+            sudo apt-get install -y shellcheck
+          fi
           shellcheck --severity=warning --exclude=SC1090 \
             build_files/build.sh scripts/*.sh tests/*.sh
 
