@@ -667,7 +667,12 @@ ATTACH_FILE="/etc/containers/registries.d/sigstore-attachments.yaml"
 ATTACH_SCOPE=""
 
 if [ -f "${ATTACH_FILE}" ]; then
-    for scope in $(sed -n 's/^[[:space:]]\{1,\}\([^[:space:]#][^:]*\):[[:space:]]*$/\1/p' "${ATTACH_FILE}"); do
+    ## The key is everything before the final colon on the line, not before
+    ## the first: a registry may carry a port, and "registry.example.com:5000"
+    ## is a perfectly ordinary scope. Stopping at the first colon found no key
+    ## at all there, and the build then failed claiming nothing covered the
+    ## repository while the entry sat in the file.
+    for scope in $(sed -n 's/^[[:space:]]\{1,\}\([^[:space:]#].*\):[[:space:]]*$/\1/p' "${ATTACH_FILE}"); do
         case "${POLICY_SCOPE}" in
             "${scope}"|"${scope}"/*) ATTACH_SCOPE="${scope}"; break ;;
         esac
