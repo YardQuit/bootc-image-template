@@ -701,12 +701,53 @@ fi
 ## than ship a replacement through sysfiles - overwriting it wholesale would
 ## drop the defaults that let every other image still be pulled.
 ##
+## Where it lives depends on the base. containers-common used to install it at
+## /etc/containers/policy.json and now installs it at
+## /usr/share/containers/policy.json instead - the move landed in 0.69. The
+## reasoning is sound for an image-based system: /etc is machine-local state,
+## merged with the machine's own edits on every update, and a default that
+## belongs to the image has no business living there.
+##
+## Both layouts are in the field: a base carrying an older containers-common
+## has the old path, a newer one the new path, and this template's Fedora and
+## CentOS options between them cover both. So follow whichever the base
+## actually ships rather than pick one - and note that /etc wins when a base
+## somehow has both, which is the order containers/image itself looks in.
+##
+## Guessing wrong is not a loud failure: the merge would land in a file the
+## running system never reads, every image would match no rule, and
+## verification would be off with nothing anywhere saying so.
+##
 ## python3 comes with every base this template lists; a base without it
 ## needs this merge rewritten (jq, or a shell-side edit).
 
-POLICY_SCOPE="${POLICY_SCOPE}" POLICY_KEY="${POLICY_KEY}" python3 - <<'POLICY'
+POLICY_FILE=""
+
+for candidate in /etc/containers/policy.json /usr/share/containers/policy.json; do
+    if [ -f "${candidate}" ]; then
+        POLICY_FILE="${candidate}"
+        break
+    fi
+done
+
+if [ -z "${POLICY_FILE}" ]; then
+    echo "ERROR: this base image ships no policy.json." >&2
+    echo >&2
+    echo "Looked in:" >&2
+    echo "  /etc/containers/policy.json" >&2
+    echo "  /usr/share/containers/policy.json" >&2
+    echo >&2
+    echo "Signature verification is merged into the file the base provides, so" >&2
+    echo "that the defaults letting every other image be pulled survive. With" >&2
+    echo "no such file there is nothing to merge into - either the base does" >&2
+    echo "not carry containers-common, or it has moved the file again. Add the" >&2
+    echo "new location to the loop above." >&2
+    exit 1
+fi
+
+POLICY_SCOPE="${POLICY_SCOPE}" POLICY_KEY="${POLICY_KEY}" POLICY_FILE="${POLICY_FILE}" python3 - <<'POLICY'
 import json, os, pathlib
-path = pathlib.Path("/etc/containers/policy.json")
+path = pathlib.Path(os.environ["POLICY_FILE"])
 policy = json.loads(path.read_text())
 policy.setdefault("transports", {}).setdefault("docker", {})[
     os.environ["POLICY_SCOPE"]
@@ -727,9 +768,9 @@ POLICY
 ## a policy naming a keyPath the image does not carry fails at upgrade time
 ## on the machine, which is far too late to hear about it.
 
-POLICY_SCOPE="${POLICY_SCOPE}" POLICY_KEY="${POLICY_KEY}" python3 -c '
+POLICY_SCOPE="${POLICY_SCOPE}" POLICY_KEY="${POLICY_KEY}" POLICY_FILE="${POLICY_FILE}" python3 -c '
 import json, os, sys
-policy = json.load(open("/etc/containers/policy.json"))
+policy = json.load(open(os.environ["POLICY_FILE"]))
 scope, key = os.environ["POLICY_SCOPE"], os.environ["POLICY_KEY"]
 rules = policy.get("transports", {}).get("docker", {}).get(scope)
 if not rules:
