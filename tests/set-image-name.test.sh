@@ -15,8 +15,8 @@
 #
 # Every test runs against a throwaway copy of the working tree, including
 # uncommitted changes, so this is worth running before pushing a change to the
-# script as well as in CI. Nothing here needs the network, podman or root, and
-# the whole file takes a couple of seconds.
+# script as well as in CI. Nothing here needs the network, podman, git or root,
+# and the whole file takes a couple of seconds.
 #
 # set -e is deliberately absent: most of these tests run a command that is
 # meant to fail and check how it failed.
@@ -37,13 +37,20 @@ check() {  # $1 what, $2 got, $3 want
     if [ "$2" = "$3" ]; then ok "$1"; else bad "$1 - got '$2', wanted '$3'"; fi
 }
 
-# A throwaway copy of the working tree, as git sees it: tracked files only, but
-# with whatever is in them right now. $1 is a name under the temp directory.
+# A throwaway copy of the working tree. $1 is a name under the temp directory.
+#
+# A plain file copy, not "git ls-files": this template is meant to be copied
+# into a new repository, and in the moment right after that - before the first
+# commit, or working from a downloaded tarball - git has nothing to list, so
+# every test below would fail for a reason that has nothing to do with the
+# rename script. The excludes mirror .gitignore.
 tree() {
     local dst="${WORK}/$1"
     rm -rf "${dst}"
     mkdir -p "${dst}"
-    ( cd "${REPO}" && git ls-files -z | tar --null -T - -cf - ) | tar -xf - -C "${dst}"
+    tar -cf - -C "${REPO}" \
+        --exclude=./.git --exclude=./output --exclude='./_build*' . \
+        | tar -xf - -C "${dst}"
     printf '%s' "${dst}"
 }
 
@@ -59,6 +66,17 @@ run() {  # $1 tree, rest: arguments
 fingerprint() {  # $1 tree
     ( cd "$1" && find . -type f -exec md5sum {} + | sort | md5sum )
 }
+
+
+# Fail once, clearly, rather than report thirty confusing failures if the copy
+# did not produce a repository.
+T="$(tree preflight)"
+if [ ! -x "${T}/scripts/set-image-name.sh" ] || [ ! -f "${T}/.github/workflows/build.yml" ]; then
+    echo "Error: ${REPO} does not look like this template - the copy has no" >&2
+    echo "scripts/set-image-name.sh or .github/workflows/build.yml. Run this" >&2
+    echo "from inside the repository." >&2
+    exit 1
+fi
 
 
 echo "An untouched template"
