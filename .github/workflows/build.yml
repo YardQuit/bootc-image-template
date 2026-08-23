@@ -77,6 +77,23 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
+      # Every per-project name in this repository - the image name here, the
+      # signature policy scope in build_files/build.sh, the kickstart in
+      # disk_config/iso.toml - starts life as a placeholder that
+      # scripts/set-image-name.sh rewrites. Copying a file down from the
+      # template later brings the placeholder back, and the rename script
+      # cannot repair that unless it is run again: it reads the name to
+      # replace out of the very files it rewrites, so in an already-renamed
+      # repository it substitutes the current name for itself and leaves the
+      # fresh placeholder alone.
+      #
+      # This check costs a second and turns that into a red build here rather
+      # than an image whose signature policy guards a repository nobody
+      # publishes to, or an ISO that installs a system pointing at one. An
+      # untouched template passes: there the placeholders are the real values.
+      - name: Check for leftover template placeholders
+        run: ./scripts/set-image-name.sh --check
+
       # Signing is required: the image ships a policy.json rule (build.sh
       # section 9c) that makes "bootc upgrade" refuse anything unsigned, so an
       # unsigned publish would produce an image no machine can update to. The

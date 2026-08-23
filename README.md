@@ -128,7 +128,7 @@ want to install it without logging in to `ghcr.io`.
 | `build_files/sysfiles/usr/lib/systemd/system/bootc-fetch-apply-updates.service.d/10-stage-only.conf` | Makes the update timer stage updates without rebooting. |
 | `disk_config/disk.toml` | Partitioning and users for VM disk images. |
 | `disk_config/iso.toml` | Installer settings for the ISO. |
-| `scripts/set-image-name.sh` | Renames the image everywhere in this repository. |
+| `scripts/set-image-name.sh` | Renames the image everywhere in this repository; `--check` reports placeholders the template left behind. |
 | `scripts/build.sh` | Builds the container locally. |
 | `scripts/build-disk.sh` | Builds an ISO or VM disk locally. |
 | `.github/workflows/build.yml` | Builds and publishes the container image. |
@@ -316,6 +316,49 @@ Unlike a plain bootc base, this image does have a working `/etc/cron.daily` -
 in there runs. Use it for your own jobs; the image updates itself through bootc,
 not through cron.
 
+## Updating from the template
+
+When a fix lands in the template and you want it, copy the file down and run
+the rename again with the values you already use:
+
+```bash
+./scripts/set-image-name.sh mydesktop myorg   # the same values as before
+```
+
+<!-- template-literals -->
+That second run is not redundant. Every per-project name in this repository -
+`IMAGE_NAME` in both workflows, the signature policy scope in
+`build_files/build.sh`, the kickstart in `disk_config/iso.toml`, the
+`registries.d` scope, the motd - starts life as the template's `myimage` and
+`myorg`, and a file copied down from the template brings those back with it.
+
+Running the script again is what removes them. It rewrites the template's
+placeholders as well as the name in use, so a fresh copy is repaired by the
+same command that renamed the repository in the first place. Nothing else
+changes: files that were already correct are reported `unchanged`.
+
+To see whether anything is stale without changing a file:
+
+```bash
+./scripts/set-image-name.sh --check
+```
+
+It lists every placeholder that outlived the rename and exits non-zero when it
+finds one. Both workflows run it before they build, so a forgotten placeholder
+is a red build rather than an image whose signature policy guards a repository
+nobody publishes to, or an ISO that installs a system pointing at one.
+
+One case it cannot cover: a name or owner that contains `myimage` or `myorg`
+as a whole word - `myorg-labs`, say. The substitutions cannot tell the two
+apart there, so both the repair and the check stand down for that value and
+say so; look for it by hand after copying files down.
+
+What none of this settles is a genuine merge, where the template and your copy
+have both changed and you want both. That is still a diff you read yourself -
+but it will be about the change you came for, not about names.
+
+<!-- /template-literals -->
+
 ## Emacs and Donkey
 
 `emacs` is in `rpm_packages`, and every user account created on the machine
@@ -437,9 +480,14 @@ Three things make it check, and all three are active in the template:
    merges a `sigstoreSigned` rule for your repository into the
    `/etc/containers/policy.json` the base provides (merged rather than
    replaced, so the defaults that let every other image be pulled survive).
-   `scripts/set-image-name.sh` keeps the repository and key name in step, and
-   a check at the end of the section fails the build if the rule ever stops
-   matching your image.
+
+   The rule is scoped to the repository the workflow is actually publishing
+   to, handed to the build as `IMAGE_REPO`, rather than to a second copy of
+   the name kept in `build.sh`. Two values that have to agree can drift
+   apart, and a rule scoped to a repository you never publish to matches
+   nothing at all - which does not fail, it silently accepts every image
+   unverified. A check at the end of the section fails the build if the rule
+   ever stops matching your image.
 
 2. **Let containers/image look for the signature.** Already active - the
    template ships
@@ -447,6 +495,12 @@ Three things make it check, and all three are active in the template:
    and `scripts/set-image-name.sh` keeps the repository in it up to date. It is
    inert on its own: it only says "look for an attachment", never "require one"
    - step 1 is what makes it a requirement.
+
+   That file ships verbatim, so unlike the policy scope it cannot follow
+   `IMAGE_REPO` by itself. Section 9c checks that its scope covers the image
+   being built and fails the build when it does not: a signature that is never
+   fetched fails every upgrade with *"A signature was required, but no
+   signature exists"*, on an image that was signed perfectly well.
 
    (containers/image reads this only from `/etc/containers/registries.d` - there
    is no `/usr` location, so it has to ship under `sysfiles/etc/`.)

@@ -6,6 +6,7 @@
 # Usage:
 #   ./scripts/set-image-name.sh <image-name> [github-owner]
 #   ./scripts/set-image-name.sh --dry-run <image-name> [github-owner]
+#   ./scripts/set-image-name.sh --check
 #
 # <github-owner> is your GitHub account or organisation handle - the part
 # between github.com/ and the repository name, e.g. "octocat" in
@@ -17,6 +18,23 @@
 #
 # The script is safe to run again later: it looks up the name currently in
 # use rather than assuming the template defaults.
+#
+# It also repairs a repository that copied files down from the template after
+# renaming - the case looking up the current name cannot cover on its own,
+# because the name it finds is already the new one and it would substitute
+# that for itself while the freshly copied "myimage"/"myorg" sat there
+# untouched. Every run rewrites those placeholders as well, so re-running the
+# same rename fixes an upstream copy:
+#
+#   ./scripts/set-image-name.sh mydesktop myorg     # after copying files down
+#
+# --check reports leftover placeholders without changing anything, and exits
+# non-zero when it finds one. .github/workflows/build.yml runs it before it
+# builds: a stale placeholder means the signature policy, the ISO kickstart or
+# the image name is pointing at a repository nobody publishes to, which is far
+# cheaper to hear about there than from a machine that can no longer upgrade.
+# The untouched template passes - "myimage" and "myorg" are its real values,
+# not leftovers.
 #
 # One caveat: renaming is a whole-word text substitution across the files below,
 # including README.md prose. Avoid naming your image after an ordinary English
@@ -46,11 +64,13 @@ FILES=(
     "disk_config/iso.toml"
     "disk_config/disk.toml"
     "build_files/sysfiles/etc/motd.d/10-welcome"
-    # These two carry the published image reference. Leave them out and a
-    # rename silently scopes signature verification to the old repository,
-    # so updates from the new one stop being checked at all - build.sh
-    # section 9c writes that scope into the image's policy.json on every
-    # build, so it has to be renamed along with everything else.
+    # These two carry the published image reference, and both feed signature
+    # verification. The registries.d file is what tells containers/image to
+    # go and fetch the signature at all, and it ships verbatim - leave it out
+    # of a rename and the signature is never looked for, so every upgrade
+    # fails on an image that was signed correctly. build.sh section 9c takes
+    # its policy scope from the workflow now, but keeps a literal for local
+    # builds and rebrands /etc/os-release from the same values.
     "build_files/build.sh"
     "build_files/sysfiles/etc/containers/registries.d/sigstore-attachments.yaml"
     "scripts/build.sh"
@@ -58,10 +78,156 @@ FILES=(
     "README.md"
 )
 
+# Two values overlap when either occurs inside the other at word boundaries -
+# exactly the distinction the whole-word substitutions below cannot make.
+# Every dangerous pairing is checked through this one rule: new name vs new
+# owner, new name vs current owner, and current name vs current owner.
+overlaps() {  # $1, $2: non-empty words. True if they collide whole-word.
+    grep -q -i -w -F -e "$1" <<<"$2" || grep -q -i -w -F -e "$2" <<<"$1"
+}
+
+# The name and owner the template ships with. Every file above carries them
+# until the first rename. Any that still does afterwards was copied down from
+# the template after that rename - the one state this script could not
+# repair, because it derives the value to replace from the very files it is
+# about to rewrite and so ends up substituting the current name for itself
+# while the freshly copied placeholders sit there untouched. The repair pass
+# further down rewrites these as well, and --check fails when one survives.
+TEMPLATE_NAME="myimage"
+TEMPLATE_OWNER="myorg"
+
+# README.md documents those two values as literals, in the section about
+# copying files down from the template. They have to survive a rename, or that
+# section starts describing the reader's own image instead of the template's -
+# and --check would then flag its own documentation on every run. Lines between
+# these markers are branched past by every substitution and ignored by --check,
+# the same way the Donkey upstream URLs are. HTML comments, so they render as
+# nothing.
+LITERAL_BEGIN='<!-- template-literals -->'
+LITERAL_END='<!-- /template-literals -->'
+
+# The file as the substitutions see it: guarded lines blanked rather than
+# deleted, so line numbers still match the real file. "#" delimits the
+# addresses because the markers contain "/".
+guarded_view() {  # $1: file
+    sed -e "\\#${LITERAL_BEGIN}#,\\#${LITERAL_END}#s/.*//" -- "$1"
+}
+
+# The name and owner in use right now: build.yml is the source of truth for
+# the name, and the ISO kickstart's ghcr.io/<owner>/<image> for the owner.
+# iso.toml is optional (the rewrite loop tolerates its absence), so a missing
+# file just means the owner is unknown rather than an error here.
+read_current_values() {
+    OLD_NAME=$(sed -n 's/^  IMAGE_NAME: "\(.*\)"$/\1/p' .github/workflows/build.yml | head -n1)
+    if [ -z "${OLD_NAME}" ]; then
+        echo "Error: could not read IMAGE_NAME from .github/workflows/build.yml." >&2
+        exit 1
+    fi
+
+    OLD_OWNER=""
+    if [ -f disk_config/iso.toml ]; then
+        OLD_OWNER=$(sed -n 's|.*ghcr\.io/\([^/]*\)/.*|\1|p' disk_config/iso.toml | head -n1)
+    fi
+}
+
+# --check: report template placeholders that outlived the rename. A
+# placeholder is only stale when it is not the value actually in use, so the
+# untouched template - where "myimage" and "myorg" ARE the current values -
+# passes cleanly, and a repository that renamed only its image name keeps
+# "myorg" as a legitimate owner.
+#
+# This is what CI runs before it builds anything: a stale placeholder there
+# means the signature policy, the kickstart or the ISO name is pointing at a
+# repository nobody publishes to, and that is much cheaper to hear about now
+# than from a machine that cannot upgrade.
+check_placeholders() {
+    local file hits placeholder skipped=0
+    local -a pats=() scan=()
+
+    # A placeholder is only worth looking for when it is neither a value in use
+    # nor something that cannot be told apart from one. The second case is the
+    # same stand-down the repair pass makes, for the same reason: under owner
+    # "myorg-labs" a whole-word search for "myorg" matches every legitimate
+    # reference ("-" is a word boundary), and a check that can only ever fail
+    # is worse than no check.
+    for placeholder in "${TEMPLATE_NAME}" "${TEMPLATE_OWNER}"; do
+        if [ "${OLD_NAME,,}" = "${placeholder}" ] || [ "${OLD_OWNER,,}" = "${placeholder}" ]; then
+            continue
+        fi
+        if overlaps "${placeholder}" "${OLD_NAME}" \
+           || { [ -n "${OLD_OWNER}" ] && overlaps "${placeholder}" "${OLD_OWNER}"; }; then
+            echo "Note: cannot check for '${placeholder}' - it overlaps this" >&2
+            echo "      repository's own name or owner as a whole word. Look for" >&2
+            echo "      it by hand after copying files from the template." >&2
+            skipped=1
+            continue
+        fi
+        pats+=(-e "${placeholder}")
+    done
+
+    if [ "${#pats[@]}" -eq 0 ]; then
+        if [ "${skipped}" -eq 1 ]; then
+            echo "Nothing left that can be checked automatically."
+        else
+            echo "Not renamed yet: '${TEMPLATE_NAME}' and '${TEMPLATE_OWNER}' are still"
+            echo "this repository's own image name and owner. Nothing to check."
+        fi
+        exit 0
+    fi
+
+    for file in "${FILES[@]}"; do
+        [ -f "${file}" ] && scan+=("${file}")
+    done
+
+    hits=""
+    for file in "${scan[@]}"; do
+        hits+=$({ guarded_view "${file}" | grep -n -i -w -F "${pats[@]}" || true; } \
+                | sed "s#^#${file}:#")
+    done
+
+    if [ -n "${hits}" ]; then
+        # The owner is read from disk_config/iso.toml, which is itself one of
+        # the files a template copy overwrites. When it reads back as the
+        # placeholder there is no owner to suggest - ask for one rather than
+        # print the placeholder as if it were the answer.
+        local owner_arg=" <github-owner>"
+        if [ -n "${OLD_OWNER}" ] && [ "${OLD_OWNER,,}" != "${TEMPLATE_OWNER}" ]; then
+            owner_arg=" ${OLD_OWNER}"
+        fi
+
+        echo "Error: template placeholders left in a repository already renamed" >&2
+        echo "to '${OLD_NAME}':" >&2
+        echo >&2
+        sed 's/^/  /' <<<"${hits}" >&2
+        echo >&2
+        echo "These are almost always files copied down from the template after" >&2
+        echo "the rename. Rewrite them with:" >&2
+        echo >&2
+        echo "  ./scripts/set-image-name.sh ${OLD_NAME}${owner_arg}" >&2
+        exit 1
+    fi
+
+    echo "No template placeholders left."
+    exit 0
+}
+
 DRY_RUN=0
-if [ "${1:-}" = "--dry-run" ]; then
-    DRY_RUN=1
-    shift
+CHECK_ONLY=0
+case "${1:-}" in
+    --dry-run) DRY_RUN=1;    shift ;;
+    --check)   CHECK_ONLY=1; shift ;;
+esac
+
+# --check needs no new values - it compares the files against the ones already
+# in use - so it runs here, before any of the validation below has anything to
+# validate.
+if [ "${CHECK_ONLY}" -eq 1 ]; then
+    if [ "$#" -gt 0 ]; then
+        echo "Usage: $0 --check   (takes no further arguments)" >&2
+        exit 1
+    fi
+    read_current_values
+    check_placeholders
 fi
 
 NEW_NAME="${1:-}"
@@ -69,6 +235,7 @@ NEW_OWNER="${2:-}"
 
 if [ -z "${NEW_NAME}" ]; then
     echo "Usage: $0 [--dry-run] <image-name> [github-owner]" >&2
+    echo "       $0 --check" >&2
     exit 1
 fi
 
@@ -122,20 +289,9 @@ if ! sed --version >/dev/null 2>&1; then
     exit 1
 fi
 
-# What is the name in use right now? build.yml is the single source of truth.
-OLD_NAME=$(sed -n 's/^  IMAGE_NAME: "\(.*\)"$/\1/p' .github/workflows/build.yml | head -n1)
-if [ -z "${OLD_NAME}" ]; then
-    echo "Error: could not read IMAGE_NAME from .github/workflows/build.yml." >&2
-    exit 1
-fi
-
-# The owner appears as ghcr.io/<owner>/<image> in the ISO kickstart. The file
-# is optional (the rename loop below tolerates its absence), so its absence
-# must not kill the script here either - it just means the owner is unknown.
-OLD_OWNER=""
-if [ -f disk_config/iso.toml ]; then
-    OLD_OWNER=$(sed -n 's|.*ghcr\.io/\([^/]*\)/.*|\1|p' disk_config/iso.toml | head -n1)
-fi
+# What is the name in use right now? Read by the same function --check uses,
+# so the two can never disagree about what "current" means.
+read_current_values
 
 # The script can only rewrite an owner it can locate. When iso.toml names no
 # ghcr.io owner (or the file is gone), a requested owner change has nothing
@@ -149,14 +305,6 @@ if [ -n "${NEW_OWNER}" ] && [ -z "${OLD_OWNER}" ]; then
     echo "restore the iso.toml reference and run this script again." >&2
     exit 1
 fi
-
-# Two values overlap when either occurs inside the other at word boundaries -
-# exactly the distinction the whole-word substitutions below cannot make.
-# Every dangerous pairing is checked through this one rule: new name vs new
-# owner, new name vs current owner, and current name vs current owner.
-overlaps() {  # $1, $2: non-empty words. True if they collide whole-word.
-    grep -q -i -w -F -e "$1" <<<"$2" || grep -q -i -w -F -e "$2" <<<"$1"
-}
 
 # Refuse to run on a repository whose current name and owner already overlap
 # (an older version of this script accepted e.g. image "zonk" with owner
@@ -260,21 +408,6 @@ if [ -n "${NEW_OWNER}" ]; then
     check_new_value "owner" "${NEW_OWNER}" "${OLD_OWNER}"
 fi
 
-# A name may contain dots, which mean "any character" to sed - escape them.
-OLD_NAME_RE=$(printf '%s' "${OLD_NAME}" | sed 's/[].[^$*\\/]/\\&/g')
-# The README carries the name in three cases at once, so the old value has to be
-# matched in all three.
-OLD_NAME_CAP_RE=$(printf '%s' "${OLD_NAME^}" | sed 's/[].[^$*\\/]/\\&/g')
-OLD_NAME_UPPER_RE=$(printf '%s' "${OLD_NAME^^}" | sed 's/[].[^$*\\/]/\\&/g')
-OLD_OWNER_RE=$(printf '%s' "${OLD_OWNER}" | sed 's/[].[^$*\\/]/\\&/g')
-
-echo "image name : ${OLD_NAME} -> ${NAME_LOWER}  (README.md: ${NAME_CAP}, ISO: ${NAME_LOWER^^})"
-if [ -n "${NEW_OWNER}" ]; then
-    # NEW_OWNER set implies OLD_OWNER is known - the refusal above guarantees it.
-    echo "owner      : ${OLD_OWNER} -> ${NEW_OWNER}"
-fi
-echo
-
 # A sed address matching the lines of a fenced code block in Markdown, used for
 # README.md below. Kept in a variable because backticks cannot appear unescaped
 # inside the double-quoted sed scripts.
@@ -287,81 +420,200 @@ FENCE='/^```/,/^```/'
 # Derived from DONKEY_UPSTREAM above so guard and collision scan stay in step.
 DONKEY_GUARD="\\#${DONKEY_UPSTREAM}#I"
 
+# The same for the template-literal range in README.md. Both guards are passed
+# to every substitution below, ahead of the substitution itself.
+LITERAL_GUARD="\\#${LITERAL_BEGIN}#,\\#${LITERAL_END}#"
+
+# One substitution pass over one file: rewrite the image name $2 and the owner
+# $3 to the new values, leaving either half alone when its argument is empty.
+# Prints the number of lines it rewrote.
+#
+# The values in use and the template placeholders both go through here, so a
+# repair behaves exactly like a rename - same case handling, same Donkey guard,
+# same counting. Nothing is written when the count is zero, so a pass with
+# nothing to do costs one grep and touches no file.
+rewrite_file() {  # $1 file, $2 old image name (""=skip), $3 old owner (""=skip)
+    local file="$1" old_name="$2" old_owner="$3"
+    local name_re cap_re upper_re owner_re hits=0
+    local -a name_pats=()
+
+    # Count the lines the substitutions below would actually rewrite - the
+    # count decides whether the file is written at all, so it must see exactly
+    # what the sed passes see. That means: the same case renderings each pass
+    # rewrites (lowercase and UPPERCASE in every file, the Capitalised form
+    # only in README.md - an arbitrary case variant like "MyImAgE" is never
+    # rewritten and must not count), the owner case-insensitively (its sed uses
+    # the I flag), and never a Donkey-upstream line, which the guard branches
+    # past. The greps exit non-zero on no match, hence the || true under
+    # set -o pipefail.
+    if [ -n "${old_name}" ]; then
+        name_pats=(-e "${old_name}" -e "${old_name^^}")
+        if [ "${file}" = "README.md" ]; then
+            name_pats+=(-e "${old_name^}")
+        fi
+        hits=$({ guarded_view "${file}" | grep -F -w "${name_pats[@]}" || true; } \
+               | { grep -v -i -F -e "${DONKEY_UPSTREAM}" || true; } | wc -l)
+    fi
+    if [ -n "${old_owner}" ]; then
+        hits=$(( hits + $({ guarded_view "${file}" | grep -i -F -w -e "${old_owner}" || true; } \
+                          | { grep -v -i -F -e "${DONKEY_UPSTREAM}" || true; } | wc -l) ))
+    fi
+
+    if [ "${hits}" -eq 0 ] || [ "${DRY_RUN}" -eq 1 ]; then
+        echo "${hits}"
+        return 0
+    fi
+
+    if [ -n "${old_name}" ]; then
+        # A name may contain dots, which mean "any character" to sed - escape
+        # them. The README carries the name in three cases at once, so the old
+        # value has to be matched in all three.
+        name_re=$(printf '%s' "${old_name}" | sed 's/[].[^$*\\/]/\\&/g')
+        cap_re=$(printf '%s' "${old_name^}" | sed 's/[].[^$*\\/]/\\&/g')
+        upper_re=$(printf '%s' "${old_name^^}" | sed 's/[].[^$*\\/]/\\&/g')
+
+        # The uppercase rendering appears in the ISO filename and in the
+        # comments that quote it, in any file - so this pass runs everywhere.
+        sed -i -e "${DONKEY_GUARD}b" \
+               -e "${LITERAL_GUARD}b" \
+               -e "s#\b${upper_re}\b#${NAME_UPPER}#g" "${file}"
+
+        if [ "${file}" = "README.md" ]; then
+            # The README carries all three renderings at once: the ISO filename
+            # is uppercase, an occurrence right after a "/" is part of an image
+            # reference (ghcr.io/<owner>/<image>, localhost/<image>) and must
+            # stay lowercase, and everything else is prose and gets the
+            # capitalised form. Each pass is case-SENSITIVE and anchored, so
+            # none of them can re-match what an earlier pass just produced -
+            # that is what keeps repeated renames stable.
+            #
+            # A fenced code block is not prose: it quotes literal file content
+            # and commands - os-release keys, image references, filenames -
+            # where the name has to read exactly as it does in the file itself.
+            # So the lowercase rule applies inside a fence, and only outside it
+            # does the capitalised form take over.
+            sed -i -e "${DONKEY_GUARD}b" \
+                   -e "${LITERAL_GUARD}b" \
+                   -e "${FENCE}{s#\b\(${name_re}\|${cap_re}\)\b#${NAME_LOWER}#g}" "${file}"
+            # "b" branches past the rest of the script for lines inside a fence,
+            # so the prose rules cannot undo the pass above.
+            sed -i -e "${DONKEY_GUARD}b" \
+                   -e "${LITERAL_GUARD}b" \
+                   -e "${FENCE}b" \
+                   -e "s#\(^\|[^/]\)\b\(${name_re}\|${cap_re}\)\b#\1${NAME_CAP}#g" \
+                   -e "s#/\b${name_re}\b#/${NAME_LOWER}#g" "${file}"
+        else
+            # Outside the README the name is always a real image reference and
+            # stays lowercase - except where a comment quotes the ISO filename,
+            # which is uppercase and was handled by the pass above.
+            sed -i -e "${DONKEY_GUARD}b" \
+                   -e "${LITERAL_GUARD}b" \
+                   -e "s#\b${name_re}\b#${NAME_LOWER}#g" "${file}"
+        fi
+    fi
+
+    if [ -n "${old_owner}" ]; then
+        owner_re=$(printf '%s' "${old_owner}" | sed 's/[].[^$*\\/]/\\&/g')
+        sed -i -e "${DONKEY_GUARD}b" \
+               -e "${LITERAL_GUARD}b" \
+               -e "s#\b${owner_re}\b#${TARGET_OWNER}#gI" "${file}"
+    fi
+
+    echo "${hits}"
+}
+
+# The owner every substitution below writes. An owner argument sets it; without
+# one it stays what it already was, which is what lets the repair pass fix a
+# copied-in "myorg" even when the caller only passed an image name.
+TARGET_OWNER="${NEW_OWNER:-${OLD_OWNER}}"
+
+# The values actually in use, or empty when they already match what was asked
+# for. Renaming a repository to the name it already has is a no-op, and saying
+# so - rather than reporting every file "updated" - is the whole point: that
+# silent no-op is how a repository ends up half-renamed after an upstream copy.
+LIVE_NAME="${OLD_NAME}"
+if [ "${OLD_NAME,,}" = "${NAME_LOWER}" ]; then
+    LIVE_NAME=""
+fi
+LIVE_OWNER="${OLD_OWNER}"
+if [ -z "${NEW_OWNER}" ] || [ "${OLD_OWNER,,}" = "${NEW_OWNER}" ]; then
+    LIVE_OWNER=""
+fi
+
+# The repair pass: rewrite the template's own placeholders wherever they
+# survived, so a file copied down from the template into an already-renamed
+# repository is fixed by the same command that did the renaming.
+#
+# It has to stand down whenever a placeholder cannot be told apart from a value
+# in use, because the substitutions are whole-word and "-" is a word boundary:
+# under owner "myorg-labs" a pass for "myorg" would eat the first half and
+# produce "neworg-labs-labs". Standing down silently is what caused this
+# problem in the first place, so it says so - except where the placeholder IS
+# the value in use, which is simply an unrenamed template with nothing to
+# repair.
+REPAIR_NAME="${TEMPLATE_NAME}"
+if [ "${NAME_LOWER}" = "${TEMPLATE_NAME}" ] || [ "${OLD_NAME,,}" = "${TEMPLATE_NAME}" ]; then
+    REPAIR_NAME=""
+elif overlaps "${REPAIR_NAME}" "${NAME_LOWER}" \
+     || { [ -n "${TARGET_OWNER}" ] && overlaps "${REPAIR_NAME}" "${TARGET_OWNER}"; }; then
+    echo "Note: leaving '${TEMPLATE_NAME}' alone - it overlaps the values in use"
+    echo "      as a whole word, so rewriting it would corrupt them. If a file"
+    echo "      copied from the template still says '${TEMPLATE_NAME}', edit it by hand."
+    REPAIR_NAME=""
+fi
+
+REPAIR_OWNER="${TEMPLATE_OWNER}"
+if [ -z "${TARGET_OWNER}" ] || [ "${TARGET_OWNER}" = "${TEMPLATE_OWNER}" ] \
+   || [ "${OLD_OWNER,,}" = "${TEMPLATE_OWNER}" ]; then
+    REPAIR_OWNER=""
+elif overlaps "${REPAIR_OWNER}" "${TARGET_OWNER}" || overlaps "${REPAIR_OWNER}" "${NAME_LOWER}"; then
+    echo "Note: leaving '${TEMPLATE_OWNER}' alone - it overlaps the values in use"
+    echo "      as a whole word, so rewriting it would corrupt them. If a file"
+    echo "      copied from the template still says '${TEMPLATE_OWNER}', edit it by hand."
+    REPAIR_OWNER=""
+fi
+
+if [ -n "${LIVE_NAME}" ]; then
+    echo "image name : ${OLD_NAME} -> ${NAME_LOWER}  (README.md: ${NAME_CAP}, ISO: ${NAME_UPPER})"
+else
+    echo "image name : ${NAME_LOWER}  (unchanged)"
+fi
+if [ -n "${LIVE_OWNER}" ]; then
+    # NEW_OWNER set implies OLD_OWNER is known - the refusal above guarantees it.
+    echo "owner      : ${OLD_OWNER} -> ${NEW_OWNER}"
+elif [ -n "${TARGET_OWNER}" ]; then
+    echo "owner      : ${TARGET_OWNER}  (unchanged)"
+fi
+if [ -n "${REPAIR_NAME}" ] || [ -n "${REPAIR_OWNER}" ]; then
+    echo "leftovers  : any surviving template placeholder is rewritten too -"
+    if [ -n "${REPAIR_NAME}" ]; then
+        echo "             ${REPAIR_NAME} -> ${NAME_LOWER}"
+    fi
+    if [ -n "${REPAIR_OWNER}" ]; then
+        echo "             ${REPAIR_OWNER} -> ${TARGET_OWNER}"
+    fi
+fi
+echo
+
 for file in "${FILES[@]}"; do
     if [ ! -f "${file}" ]; then
         echo "  skipped (not found): ${file}"
         continue
     fi
 
-    # Count the lines the substitutions below would actually rewrite - the
-    # count decides whether the file is skipped, so it must see exactly what
-    # the sed passes see. That means: the same case renderings each pass
-    # rewrites (lowercase and UPPERCASE in every file, the Capitalised form
-    # only in README.md - an arbitrary case variant like "MyImAgE" is never
-    # rewritten and must not count), the owner case-insensitively (its sed
-    # uses the I flag), and never a Donkey-upstream line, which the guard
-    # branches past. The greps exit non-zero on no match, hence the || true
-    # under set -o pipefail.
-    name_pats=(-e "${OLD_NAME}" -e "${OLD_NAME^^}")
-    if [ "${file}" = "README.md" ]; then
-        name_pats+=(-e "${OLD_NAME^}")
-    fi
-    hits=$({ grep -F -w "${name_pats[@]}" -- "${file}" || true; } \
-           | { grep -v -i -F -e "${DONKEY_UPSTREAM}" || true; } | wc -l)
-    if [ -n "${NEW_OWNER}" ]; then
-        hits=$(( hits + $({ grep -i -F -w -e "${OLD_OWNER}" -- "${file}" || true; } \
-                          | { grep -v -i -F -e "${DONKEY_UPSTREAM}" || true; } | wc -l) ))
-    fi
+    # The rename first, then the repair. Order matters: the repair pass reads
+    # the file the rename just wrote, so a placeholder and a real reference on
+    # the same line are both handled, in that order.
+    hits=$(rewrite_file "${file}" "${LIVE_NAME}" "${LIVE_OWNER}")
+    hits=$(( hits + $(rewrite_file "${file}" "${REPAIR_NAME}" "${REPAIR_OWNER}") ))
 
     if [ "${hits}" -eq 0 ]; then
         echo "  unchanged: ${file}"
-        continue
-    fi
-
-    if [ "${DRY_RUN}" -eq 1 ]; then
+    elif [ "${DRY_RUN}" -eq 1 ]; then
         echo "  would change ${hits} line(s): ${file}"
-        continue
-    fi
-
-    # The uppercase rendering appears in the ISO filename and in the comments
-    # that quote it, in any file - so this pass runs everywhere.
-    sed -i -e "${DONKEY_GUARD}b" \
-           -e "s#\b${OLD_NAME_UPPER_RE}\b#${NAME_UPPER}#g" "${file}"
-
-    if [ "${file}" = "README.md" ]; then
-        # The README carries all three renderings at once: the ISO filename is
-        # uppercase, an occurrence right after a "/" is part of an image
-        # reference (ghcr.io/<owner>/<image>, localhost/<image>) and must stay
-        # lowercase, and everything else is prose and gets the capitalised
-        # form. Each pass is case-SENSITIVE and anchored, so none of them can
-        # re-match what an earlier pass just produced - that is what keeps
-        # repeated renames stable.
-        #
-        # A fenced code block is not prose: it quotes literal file content and
-        # commands - os-release keys, image references, filenames - where the
-        # name has to read exactly as it does in the file itself. So the
-        # lowercase rule applies inside a fence, and only outside it does the
-        # capitalised form take over.
-        sed -i -e "${DONKEY_GUARD}b" \
-               -e "${FENCE}{s#\b\(${OLD_NAME_RE}\|${OLD_NAME_CAP_RE}\)\b#${NAME_LOWER}#g}" "${file}"
-        # "b" branches past the rest of the script for lines inside a fence, so
-        # the prose rules cannot undo the pass above.
-        sed -i -e "${DONKEY_GUARD}b" \
-               -e "${FENCE}b" \
-               -e "s#\(^\|[^/]\)\b\(${OLD_NAME_RE}\|${OLD_NAME_CAP_RE}\)\b#\1${NAME_CAP}#g" \
-               -e "s#/\b${OLD_NAME_RE}\b#/${NAME_LOWER}#g" "${file}"
     else
-        # Outside the README the name is always a real image reference and stays
-        # lowercase - except where a comment quotes the ISO filename, which is
-        # uppercase and was handled by the pass above.
-        sed -i -e "${DONKEY_GUARD}b" \
-               -e "s#\b${OLD_NAME_RE}\b#${NAME_LOWER}#g" "${file}"
+        echo "  updated ${hits} line(s): ${file}"
     fi
-    if [ -n "${NEW_OWNER}" ]; then
-        sed -i -e "${DONKEY_GUARD}b" \
-               -e "s#\b${OLD_OWNER_RE}\b#${NEW_OWNER}#gI" "${file}"
-    fi
-    echo "  updated ${hits} line(s): ${file}"
 done
 
 echo

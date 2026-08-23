@@ -591,39 +591,77 @@ if [ ! -f "${CTX}/cosign.pub" ]; then
     exit 1
 fi
 
-## The repository the policy rule guards, and the key it verifies against.
-## Both are rewritten by scripts/set-image-name.sh, so they follow a rename.
-POLICY_SCOPE="ghcr.io/myorg/myimage"
-POLICY_KEY="/etc/pki/containers/myimage.pub"
+## The repository the policy rule guards.
+##
+## A rule only applies to the repository it names. An image published
+## somewhere else matches no rule at all, falls back to the base default
+## "insecureAcceptAnything", and is then accepted unverified - silently, with
+## nothing anywhere reporting a problem. So the repository is not written
+## down here a second time: the workflow already passes the one it really
+## publishes to as IMAGE_REPO, and the rule is scoped to that. Two values
+## that must agree can drift apart; one value cannot.
+##
+## The literal is the fallback for local builds, which pass no IMAGE_REPO
+## because no registry is involved. scripts/set-image-name.sh keeps it
+## current, and "set-image-name.sh --check" - run by build.yml before
+## anything else - fails the build if it is ever left stale.
+POLICY_SCOPE="${IMAGE_REPO:-ghcr.io/myorg/myimage}"
+
+## The key filename deliberately carries no project name. Nothing outside
+## this section reads the path, so naming it after the image would only add
+## one more literal to keep in step with a rename, for no gain.
+POLICY_KEY="/etc/pki/containers/signing-key.pub"
 
 install -Dm0644 "${CTX}/cosign.pub" "${POLICY_KEY}"
 
-## A policy rule only applies to the repository it names, and an image
-## published somewhere else simply matches no rule - which means it falls
-## back to the base default, "insecureAcceptAnything". Verification would
-## then be off, silently, with nothing anywhere reporting a problem. The
-## workflow passes the repository it really publishes to as IMAGE_REPO, so
-## the two can be compared here instead of taken on trust. This catches the
-## easy mistake: running set-image-name.sh without the optional owner
-## argument renames the image everywhere but leaves the owner as "myorg".
+## The policy rule is only half the chain. containers/image does not look for
+## a signature at all unless the repository is listed in
+## /etc/containers/registries.d, and a listing that does not cover this image
+## means the signature is never fetched - so the sigstoreSigned rule above
+## fails every upgrade with "A signature was required, but no signature
+## exists", on an image that was signed perfectly well.
 ##
-## Local builds pass no IMAGE_REPO and skip the comparison - there is no
-## registry involved to disagree with.
-if [ -n "${IMAGE_REPO:-}" ] && [ "${IMAGE_REPO}" != "${POLICY_SCOPE}" ]; then
-    echo "ERROR: the signature policy guards a different repository than" >&2
-    echo "the one this image is published to:" >&2
+## That listing ships as a plain file through sysfiles, so unlike the scope
+## above it cannot follow IMAGE_REPO by itself. Check the two agree here,
+## rather than let the machines find out. This is what catches a
+## sigstore-attachments.yaml copied down from the template into a repository
+## that was renamed long ago.
+##
+## containers/image matches these entries by namespace prefix, so a broader
+## scope ("ghcr.io", or "ghcr.io/<owner>") is a legitimate choice and is
+## accepted too.
+
+ATTACH_FILE="/etc/containers/registries.d/sigstore-attachments.yaml"
+ATTACH_SCOPE=""
+
+if [ -f "${ATTACH_FILE}" ]; then
+    for scope in $(sed -n 's/^[[:space:]]\{1,\}\([^[:space:]#][^:]*\):[[:space:]]*$/\1/p' "${ATTACH_FILE}"); do
+        case "${POLICY_SCOPE}" in
+            "${scope}"|"${scope}"/*) ATTACH_SCOPE="${scope}"; break ;;
+        esac
+    done
+fi
+
+if [ -z "${ATTACH_SCOPE}" ]; then
+    echo "ERROR: nothing in ${ATTACH_FILE}" >&2
+    echo "covers the repository this image verifies:" >&2
     echo >&2
     echo "  policy scope : ${POLICY_SCOPE}" >&2
-    echo "  published to : ${IMAGE_REPO}" >&2
     echo >&2
-    echo "Machines would find no rule for the image they pull, fall back to" >&2
-    echo "accepting anything, and never verify a signature again. Line these" >&2
-    echo "up with:" >&2
+    echo "Without a matching entry containers/image never fetches the" >&2
+    echo "signature, and every 'bootc upgrade' fails with \"A signature was" >&2
+    echo "required, but no signature exists\" - on a correctly signed image." >&2
+    echo >&2
+    echo "Line the two up with:" >&2
     echo >&2
     echo "  ./scripts/set-image-name.sh <image-name> <github-owner>" >&2
     echo >&2
-    echo "passing the owner as well - without it the owner half stays as it" >&2
-    echo "was and this is exactly what happens." >&2
+    echo "which rewrites both, or edit the scope in" >&2
+    echo "build_files/sysfiles/etc/containers/registries.d/sigstore-attachments.yaml" >&2
+    echo "by hand." >&2
+    echo >&2
+    echo "Pass the owner as well: without it a rename changes the image half" >&2
+    echo "and leaves the owner as it was, which lands you exactly here." >&2
     exit 1
 fi
 
