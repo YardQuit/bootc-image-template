@@ -134,6 +134,7 @@ echo "${DONKEY_SHA256}  /etc/skel/.config/emacs/donkey/donkey.el" | sha256sum -c
 
 # rpm --import https://downloads.1password.com/linux/keys/1password.asc
 # dnf5 -y install https://downloads.1password.com/linux/rpm/stable/x86_64/1password-latest.rpm
+
 # ## The package drops in a dnf repository for its own auto-updates. An image
 # ## updates when you rebuild it, so the file has no purpose here.
 # rm -f /etc/yum.repos.d/1password.repo
