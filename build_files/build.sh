@@ -684,6 +684,21 @@ if rules[0].get("keyPath") != key or not os.path.exists(key):
 ## anacron's /var/spool/anacron, for instance, is already covered by
 ## /usr/lib/tmpfiles.d/cronie-anacron.conf from the cronie-anacron package.
 
+## geoclue is the exception that cannot live in that file. It arrives as a
+## dependency rather than a choice - xdg-desktop-portal pulls it in - and
+## creates /var/lib/geoclue during the build, which lint then flags. The rule
+## has to name geoclue's own user and group, and a tmpfiles rule naming a user
+## that does not exist is not merely ignored: systemd-tmpfiles reports
+## "Failed to resolve user" and exits non-zero, so the boot-time
+## systemd-tmpfiles-setup unit ends up FAILED - the same red unit this image
+## masks systemd-remount-fs to avoid. A base without geoclue would get exactly
+## that from a statically shipped line, so write the rule here, where the
+## build can see whether the user is actually there.
+if getent passwd geoclue >/dev/null 2>&1; then
+    printf 'd /var/lib/geoclue 0755 geoclue geoclue - -\n' \
+        > /usr/lib/tmpfiles.d/20-geoclue-var-dir.conf
+fi
+
 ### 11. Build residue #######################################################
 ##
 ## /run is a tmpfs on a running system, so anything an RPM scriptlet left there
