@@ -6,20 +6,16 @@
 # https://docs.github.com/code-security/dependabot/dependabot-version-updates
 version: 2
 updates:
-  # The base image in the Containerfile. Dependabot's docker ecosystem matches
-  # "Containerfile" as well as "Dockerfile", so the FROM line is watched: when
-  # the next Fedora release ships, a pull request offers the bump instead of it
-  # going unnoticed until something breaks. Expect that bump to skip packages -
-  # a new release renames and drops some - which is why build.sh records what
-  # it could not install rather than failing.
-  - package-ecosystem: "docker"
-    directory: "/"
-    schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 5
-    commit-message:
-      prefix: "build"
-
+  # Only the actions. The base image in the Containerfile is deliberately not
+  # watched, though Dependabot's docker ecosystem would match "Containerfile"
+  # as well as "Dockerfile" if you added it.
+  #
+  # It cannot tell a released Fedora from one that has only branched: the tag
+  # for the next version exists months before the release, pointing at the same
+  # image as "rawhide" and carrying a release-candidate kernel, and Dependabot
+  # sees nothing but a higher number. Following that would move the image onto
+  # a pre-release without saying so. Watch for new Fedora and CentOS releases
+  # yourself and edit the FROM line when you mean to.
   - package-ecosystem: "github-actions"
     directory: "/"          # workflows live in .github/workflows, "/" is correct
     schedule:

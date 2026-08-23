@@ -142,7 +142,7 @@ rides the newest, so it can never be pruned away. Change
 | `.github/workflows/build.yml` | Builds and publishes the container image, and prunes old versions. |
 | `.github/workflows/build-disk.yml` | Builds the installer ISO on demand. |
 | `.github/workflows/checks.yml` | ShellCheck, the rename tests, and a parse of every YAML and TOML file. |
-| `.github/dependabot.yml` | Keeps the base image and the actions the workflows use up to date. |
+| `.github/dependabot.yml` | Keeps the actions the workflows use up to date. The base image is left to you. |
 | `LICENSE` | MIT. Replace the copyright line with your own name if you build on this. |
 
 ## Customising the image
