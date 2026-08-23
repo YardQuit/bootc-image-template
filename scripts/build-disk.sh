@@ -27,6 +27,23 @@ else
     CONFIG="disk_config/disk.toml"
 fi
 
+# disk.toml ships a placeholder password on an account that is in wheel. Build
+# a qcow2 from it unedited and the result is a sudo-capable login whose
+# password is published in the repository - so stop here instead. The ISO does
+# not read this file at all: Anaconda asks for a user at install time.
+if [ "${CONFIG}" = "disk_config/disk.toml" ] && grep -q '"changeme"' "${CONFIG}"; then
+    echo "Error: ${CONFIG} still has the placeholder password \"changeme\"." >&2
+    echo >&2
+    echo "That account is in wheel, so the disk image you are about to build" >&2
+    echo "would have a sudo login with a password anyone can read in this" >&2
+    echo "repository. Edit the [[customizations.user]] block first:" >&2
+    echo >&2
+    echo "  - an SSH key instead: uncomment \"key\", delete \"password\"" >&2
+    echo "  - or a hash instead of plaintext: openssl passwd -6" >&2
+    echo "  - or just a different password, if the image stays on this machine" >&2
+    exit 1
+fi
+
 # The builder reads from root's container storage, but "podman build" without
 # sudo writes to yours. Copy the image over if it isn't there yet.
 if ! sudo podman image exists "${IMAGE}"; then

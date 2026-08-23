@@ -34,8 +34,12 @@ env:
   IMAGE_REGISTRY: "ghcr.io/${{ github.repository_owner }}"
   BUILDER_IMAGE: "quay.io/centos-bootc/bootc-image-builder:latest"
 
+# An ISO build is manual and slow, and two of them usually mean two different
+# tags. The input is part of the group so those run side by side; dispatching
+# the same tag twice still cancels the older run, which is the case where the
+# first result is genuinely worthless.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ inputs.tag }}
   cancel-in-progress: true
 
 jobs:

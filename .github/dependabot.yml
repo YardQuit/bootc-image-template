@@ -6,6 +6,20 @@
 # https://docs.github.com/code-security/dependabot/dependabot-version-updates
 version: 2
 updates:
+  # The base image in the Containerfile. Dependabot's docker ecosystem matches
+  # "Containerfile" as well as "Dockerfile", so the FROM line is watched: when
+  # the next Fedora release ships, a pull request offers the bump instead of it
+  # going unnoticed until something breaks. Expect that bump to skip packages -
+  # a new release renames and drops some - which is why build.sh records what
+  # it could not install rather than failing.
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "build"
+
   - package-ecosystem: "github-actions"
     directory: "/"          # workflows live in .github/workflows, "/" is correct
     schedule:

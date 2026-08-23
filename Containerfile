@@ -40,4 +40,14 @@ RUN --mount=type=bind,from=ctx,source=/,target=/ctx \
     /ctx/build.sh
 
 ## Sanity check: fails the build if the image is not a valid bootable container.
-RUN bootc container lint
+##
+## --fatal-warnings makes lint's warnings fail too, not just its errors. Those
+## warnings are the ones that describe a system that boots but misbehaves - a
+## directory written to /var that no tmpfiles.d rule recreates, say, which is
+## silently empty on every machine that installs the image. They are easy to
+## miss in a build log and expensive to find later.
+##
+## Drop the flag if a warning ever blocks you and you have decided it is not
+## worth fixing; "bootc container lint --list" names every check, and --skip
+## turns off one by name, which is better than turning them all off.
+RUN bootc container lint --fatal-warnings

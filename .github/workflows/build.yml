@@ -56,7 +56,10 @@ jobs:
     permissions:
       contents: read
       packages: write   # needed to push to ghcr.io
-      id-token: write   # needed by cosign
+
+    # The prune job below needs the same lowercased name this job builds with.
+    outputs:
+      image_name: ${{ steps.build.outputs.image_name }}
 
     steps:
       # Bootable images are big (several GB). The runner ships with toolchains
@@ -212,7 +215,7 @@ jobs:
             --label "org.opencontainers.image.source=${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}"
             --label "org.opencontainers.image.revision=${GITHUB_SHA}"
             --label "org.opencontainers.image.created=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-            --label "org.opencontainers.image.licenses=Apache-2.0"
+            --label "org.opencontainers.image.licenses=MIT"
             --label "containers.bootc=1"
           )
 
@@ -235,6 +238,27 @@ jobs:
             echo "image_registry=${IMAGE_REGISTRY}"
             echo "tags=${TAGS[*]}"
           } >> "${GITHUB_OUTPUT}"
+
+          # build.sh installs packages with --skip-unavailable, so a name the
+          # repos no longer provide leaves the build green and the tool absent.
+          # It records those in the image; lift them onto the run page, where
+          # they are visible without opening a 3000-line log. This is the usual
+          # aftermath of a base-image bump: the new release renamed or dropped
+          # something, and this is the list to reconcile.
+          SKIPPED="$(podman run --rm "localhost/${IMAGE_NAME}:latest" \
+                     cat /usr/share/image-build/skipped-packages 2>/dev/null || true)"
+          if [ -n "${SKIPPED}" ]; then
+            {
+              echo "### Packages not installed"
+              echo
+              echo "The repos provide none of these, and \`--skip-unavailable\`"
+              echo "let the build continue without them:"
+              echo
+              echo '```'
+              echo "${SKIPPED}"
+              echo '```'
+            } >> "${GITHUB_STEP_SUMMARY}"
+          fi
 
       # Everything below only runs for real builds of the repository's default
       # branch, so pull requests can never publish or sign an image.
@@ -312,10 +336,18 @@ jobs:
           # credential file to the runner.
           IMAGE_DIGEST="${{ steps.build.outputs.image_registry }}/${{ steps.build.outputs.image_name }}@${{ steps.push.outputs.digest }}"
 
+          # --tlog-upload=false keeps the signature out of the public Rekor
+          # transparency log. Nothing in this chain reads it: verification on
+          # the machine is a policy.json sigstoreSigned rule against a key the
+          # image carries, and the verify below passes --insecure-ignore-tlog
+          # already. Uploading would publish the repository name and digest of
+          # every build to a public log for no gain - and for a private package
+          # that is a leak. Drop the flag if you do want the public record.
           cosign sign -y \
             --registry-username "${GITHUB_ACTOR}" \
             --registry-password "${REGISTRY_TOKEN}" \
             --key env://COSIGN_PRIVATE_KEY \
+            --tlog-upload=false \
             "${IMAGE_DIGEST}"
 
           # Verify what actually landed in the registry, with the public key
@@ -333,3 +365,37 @@ jobs:
             --insecure-ignore-tlog=true \
             "${IMAGE_DIGEST}" > /dev/null
           echo "Signature verifies against the committed cosign.pub."
+
+  # A nightly build publishes one new image version carrying three tags
+  # (latest, the date, and latest.<date> - all the same digest, so GHCR counts
+  # them as one version). Nothing ever removes the old ones, so the package
+  # page fills up with a version per day and several GB each. This keeps the
+  # most recent ones and deletes the rest.
+  #
+  # "latest" always rides the newest version, so a count-based rule can never
+  # take it away; ignore-versions guards it anyway, and a run that would match
+  # nothing simply deletes nothing.
+  #
+  # To keep everything instead, delete this job. To keep more or less history,
+  # change min-versions-to-keep.
+  prune:
+    name: Prune old image versions
+    needs: build
+    # Same gate as the publish steps: nothing was pushed otherwise, so there is
+    # nothing this run should be pruning.
+    if: >-
+      github.event_name != 'pull_request' &&
+      (github.event_name == 'schedule' ||
+       github.ref == format('refs/heads/{0}', github.event.repository.default_branch))
+    runs-on: ubuntu-24.04
+    permissions:
+      packages: write   # deleting package versions needs write, not read
+
+    steps:
+      - name: Delete all but the most recent versions
+        uses: actions/delete-package-versions@v5
+        with:
+          package-name: ${{ needs.build.outputs.image_name }}
+          package-type: container
+          min-versions-to-keep: 30
+          ignore-versions: '^latest$'

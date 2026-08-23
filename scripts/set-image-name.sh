@@ -141,7 +141,7 @@ read_current_values() {
 # repository nobody publishes to, and that is much cheaper to hear about now
 # than from a machine that cannot upgrade.
 check_placeholders() {
-    local file hits placeholder skipped=0
+    local file hits found placeholder skipped=0
     local -a pats=() scan=()
 
     # A placeholder is only worth looking for when it is neither a value in use
@@ -179,10 +179,18 @@ check_placeholders() {
         [ -f "${file}" ] && scan+=("${file}")
     done
 
+    # One grep per file, because guarded_view has to read each one separately.
+    # The newline is added back deliberately: a command substitution strips
+    # trailing newlines, so appending one file's matches straight onto the
+    # previous file's would run the last line of one into the first line of
+    # the next.
     hits=""
     for file in "${scan[@]}"; do
-        hits+=$({ guarded_view "${file}" | grep -n -i -w -F "${pats[@]}" || true; } \
+        found=$({ guarded_view "${file}" | grep -n -i -w -F "${pats[@]}" || true; } \
                 | sed "s#^#${file}:#")
+        if [ -n "${found}" ]; then
+            hits+="${found}"$'\n'
+        fi
     done
 
     if [ -n "${hits}" ]; then
@@ -198,7 +206,7 @@ check_placeholders() {
         echo "Error: template placeholders left in a repository already renamed" >&2
         echo "to '${OLD_NAME}':" >&2
         echo >&2
-        sed 's/^/  /' <<<"${hits}" >&2
+        sed 's/^/  /' <<<"${hits%$'\n'}" >&2
         echo >&2
         echo "These are almost always files copied down from the template after" >&2
         echo "the rename. Rewrite them with:" >&2
@@ -384,19 +392,32 @@ DONKEY_UPSTREAM='yardquit/donkey'
 # than build breakage. Renaming to the value already in use is a no-op, not
 # a collision.
 check_new_value() {  # $1 = "image name"|"owner"   $2 = candidate   $3 = current
-    local label="$1" candidate="$2" current="$3" scan=() file hits
+    local label="$1" candidate="$2" current="$3" scan=() file hits found
     [ "${candidate,,}" = "${current,,}" ] && return 0
     for file in "${FILES[@]}"; do
         [ "${label}" = "image name" ] && [ "${file}" = "README.md" ] && continue
         [ -f "${file}" ] && scan+=("${file}")
     done
-    hits=$(grep -H -n -i -w -F -e "${candidate}" -- "${scan[@]}" 2>/dev/null \
-           | grep -v -i -F -e "${DONKEY_UPSTREAM}" || true)
+    # Read through guarded_view for the same reason the substitutions branch
+    # past that range: those lines are never rewritten, so an occurrence there
+    # can never be corrupted by a later rename and must not count as a
+    # collision. Without this the README's own worked example - it names
+    # "myorg-labs" to explain the overlap rule - would refuse an owner
+    # genuinely called that. Same reasoning as the Donkey-upstream skip below.
+    hits=""
+    for file in "${scan[@]}"; do
+        found=$({ guarded_view "${file}" | grep -n -i -w -F -e "${candidate}" \
+                  | grep -v -i -F -e "${DONKEY_UPSTREAM}" || true; } \
+                | sed "s#^#${file}:#")
+        if [ -n "${found}" ]; then
+            hits+="${found}"$'\n'
+        fi
+    done
     if [ -n "${hits}" ]; then
         echo "Error: the ${label} '${candidate}' already appears in files this" >&2
         echo "script rewrites, where it is not an image reference. A later" >&2
         echo "rename could not tell the two apart and would corrupt these:" >&2
-        head -n 5 <<<"${hits}" | sed 's/^/  /' >&2
+        head -n 5 <<<"${hits%$'\n'}" | sed 's/^/  /' >&2
         echo "Pick a different ${label}." >&2
         exit 1
     fi

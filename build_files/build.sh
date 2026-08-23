@@ -221,10 +221,42 @@ echo "${DONKEY_SHA256}  /etc/skel/.config/emacs/donkey/donkey.el" | sha256sum -c
 ## Blank lines and lines starting with # are ignored.
 PACKAGES=$(grep -vE '^\s*(#|$)' "${CTX}/rpm_packages" | tr '\n' ' ')
 
-## --skip-unavailable keeps the build going when one package is missing from
-## the repos (e.g. it was renamed). Drop it if you want a hard failure instead.
+## --skip-unavailable keeps the build going when a package is missing from the
+## repos. That is deliberate and worth keeping: a new Fedora release renames,
+## merges and drops packages, and a hard failure there would block the release
+## upgrade itself until every name in rpm_packages had been chased down. Better
+## to get the new base first and reconcile the list afterwards.
+##
+## The cost is that a missing package is otherwise invisible - the build stays
+## green and the tool is simply absent on the machine. So write down what did
+## not arrive, both in the build log and in the image itself, where it can be
+## read back long after the log has expired:
+##
+##   /usr/share/image-build/rpm_packages       what this image asked for
+##   /usr/share/image-build/skipped-packages   what the repos did not provide
+##
+## Both files are always present; an empty skipped-packages means everything
+## asked for is installed. CI also copies the list into the run summary.
+##
+## "rpm -q --whatprovides" is what decides, rather than the package name alone,
+## so a name satisfied by a virtual provide or by a renamed package still
+## counts as installed.
 if [ -n "${PACKAGES}" ]; then
     dnf5 install --skip-unavailable -y ${PACKAGES}
+fi
+
+install -d -m 0755 /usr/share/image-build
+install -m 0644 "${CTX}/rpm_packages" /usr/share/image-build/rpm_packages
+
+rpm -q --whatprovides ${PACKAGES} 2>&1 \
+    | sed -n 's/^no package provides //p' \
+    > /usr/share/image-build/skipped-packages || true
+chmod 0644 /usr/share/image-build/skipped-packages
+
+if [ -s /usr/share/image-build/skipped-packages ]; then
+    echo "### PACKAGES NOT INSTALLED - the repos provide none of these:"
+    sed 's/^/###   /' /usr/share/image-build/skipped-packages
+    echo "### Recorded in the image at /usr/share/image-build/skipped-packages"
 fi
 
 ## Fedora's emacs-common ships a starter /etc/skel/.emacs. It arrives here -

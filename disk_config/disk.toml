@@ -14,10 +14,26 @@ minsize = "20 GiB"
 # minsize = "10 GiB"
 
 # A user to log in with. Without this you get a system you cannot sign in to,
-# so keep at least one user (or add an SSH key).
+# so keep at least one user (or an SSH key).
+#
+# "changeme" is a placeholder, not a default: this account is in wheel, so it
+# can use sudo, and anything built from an unedited file has a sudo-capable
+# login whose password is written down in a public repository.
+# scripts/build-disk.sh refuses to build a disk image while it still says
+# "changeme" - the ISO is unaffected, because there Anaconda asks for a user
+# at install time instead of reading this file.
+#
+# Three ways out, best first:
+#   1. an SSH key and no password at all - uncomment "key" and delete
+#      "password";
+#   2. a hash rather than the plaintext, so the repository never holds the
+#      real password:
+#          openssl passwd -6
+#      and paste the "$6$..." result as the password value;
+#   3. a plaintext password, if the disk image never leaves your machine.
 [[customizations.user]]
 name = "user"
-password = "changeme"          # change this, or use "key" below instead
+password = "changeme"
 groups = ["wheel"]             # wheel = allowed to use sudo
 # key = "ssh-ed25519 AAAA... you@example.com"
 

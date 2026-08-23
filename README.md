@@ -113,6 +113,13 @@ The first push also creates the package on GitHub. It starts out **private** -
 open *Packages -> your image -> Package settings* and make it public if you
 want to install it without logging in to `ghcr.io`.
 
+Each build publishes one version carrying three tags - `latest`, the date, and
+`latest.<date>`, all the same digest - and a nightly schedule would otherwise
+leave a version per day on the package page forever. The `prune` job in
+`build.yml` keeps the 30 most recent and deletes the rest; `latest` always
+rides the newest, so it can never be pruned away. Change
+`min-versions-to-keep`, or delete the job to keep everything.
+
 ## What each file does
 
 | File | Purpose |
@@ -131,15 +138,35 @@ want to install it without logging in to `ghcr.io`.
 | `scripts/set-image-name.sh` | Renames the image everywhere in this repository; `--check` reports placeholders the template left behind. |
 | `scripts/build.sh` | Builds the container locally. |
 | `scripts/build-disk.sh` | Builds an ISO or VM disk locally. |
-| `.github/workflows/build.yml` | Builds and publishes the container image. |
+| `tests/set-image-name.test.sh` | Tests for the rename script. Needs no network, podman or root. |
+| `.github/workflows/build.yml` | Builds and publishes the container image, and prunes old versions. |
 | `.github/workflows/build-disk.yml` | Builds the installer ISO on demand. |
-| `.github/dependabot.yml` | Keeps the actions used by the workflows up to date. |
+| `.github/workflows/checks.yml` | ShellCheck, the rename tests, and a parse of every YAML and TOML file. |
+| `.github/dependabot.yml` | Keeps the base image and the actions the workflows use up to date. |
+| `LICENSE` | MIT. Replace the copyright line with your own name if you build on this. |
 
 ## Customising the image
 
 **Packages** - add them to `build_files/rpm_packages`, one per line. It is one
 flat alphabetical list rather than grouped sections, so a name is easy to find
 and easy to slot in. Check a name first with `dnf info <package>`.
+
+A name the repos do not provide does not fail the build - `--skip-unavailable`
+is deliberate, because a new Fedora release renames, merges and drops packages,
+and failing there would block the release upgrade itself until every name had
+been chased down. Better to take the new base and reconcile the list after. So
+that a missing package is not simply invisible, the build writes down what did
+not arrive:
+
+| Where | What |
+| --- | --- |
+| the build log | a `### PACKAGES NOT INSTALLED` block |
+| the run summary | the same list, on the workflow run page in CI |
+| `/usr/share/image-build/skipped-packages` | in the image, readable on the machine |
+| `/usr/share/image-build/rpm_packages` | what that image asked for, to compare against |
+
+An empty `skipped-packages` means everything on the list is installed. After a
+base-image bump, that file is the to-do list.
 
 **Files** - drop them under `build_files/sysfiles/` using the path they should
 have in the image. For example `build_files/sysfiles/etc/motd.d/10-welcome`
@@ -160,8 +187,12 @@ Two things are worth knowing when you write build steps:
   systemd-tmpfiles recreates it on every boot. `bootc container lint` names any
   directory that still needs one, and the build is warning-free as it stands -
   so a new warning means a package you added brought a directory with it.
-- The build fails on the final `bootc container lint` if the image is not a
-  valid bootable container - that check is there to catch mistakes early.
+- The build ends on `bootc container lint --fatal-warnings`, so it fails if the
+  image is not a valid bootable container *or* if lint warns. Warnings there
+  describe a system that boots and then misbehaves - the `/var` case above is
+  one - and they are easy to lose in a build log. `bootc container lint --list`
+  names every check, and `--skip <name>` turns off one of them, which is better
+  than dropping `--fatal-warnings` altogether.
 
 ## Packages that install into /opt
 
@@ -248,6 +279,32 @@ CI derives from them is unaffected.
 
 A local container build is a good way to test package names quickly; you do not
 need to push to test whether the image builds.
+
+`build-disk.sh qcow2` and `raw` read `disk_config/disk.toml`, which defines the
+account you log in with. It ships with the placeholder password `changeme` on a
+user in `wheel`, and the script refuses to build while it says that - a disk
+image built from it unedited would have a sudo login whose password is written
+down in a public repository. Replace it with an SSH key (best), a hash from
+`openssl passwd -6` (so the repository never holds the real password), or a
+different password if the image never leaves your machine. The ISO is
+unaffected: there Anaconda asks for a user at install time.
+
+## Checks
+
+```bash
+./tests/set-image-name.test.sh      # the rename script's guards
+shellcheck --severity=warning --exclude=SC1090 \
+    build_files/build.sh scripts/*.sh tests/*.sh
+```
+
+`.github/workflows/checks.yml` runs both on every push and pull request, along
+with a parse of every YAML and TOML file in the repository. It needs no
+registry and no signing key, so unlike the image build it never skips.
+
+The rename script gets tests because of how it fails: it rewrites every image
+reference with whole-word text substitution, and when a guard is wrong it does
+not crash - it writes a plausible-looking file, the build stays green, and the
+first symptom is a machine that cannot upgrade.
 
 ## ISOs in CI
 
@@ -591,3 +648,11 @@ FUSE, and build times grow several times over (one real image went from ~12 to
 Calling `podman build`, `podman push` and `podman run` directly avoids that, and
 has the pleasant side effect that the workflows read like the commands you would
 type yourself.
+
+## License
+
+MIT - see [LICENSE](LICENSE). The images this template builds are labelled
+`org.opencontainers.image.licenses=MIT` to match, in `.github/workflows/build.yml`.
+
+If you build on this, put your own name on the copyright line. Change both if
+you relicense.

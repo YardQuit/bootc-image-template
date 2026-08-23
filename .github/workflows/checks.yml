@@ -1,0 +1,92 @@
+---
+# Static checks on the repository itself: the shell it ships, and the tests for
+# the rename script.
+#
+# Separate from build.yml on purpose. This runs in under a minute and has no
+# registry, no signing key and no reason to be skipped, so it can run on every
+# push and pull request - including the documentation-only ones build.yml
+# ignores, which are exactly the ones that touch README.md and can therefore
+# change what the rename script sees.
+name: Checks
+
+on:
+  push:
+    # Both common default-branch names, for the reason build.yml explains: a
+    # repository created from this template inherits its creator's default
+    # branch name, and a branch missing here fails silently.
+    branches:
+      - main
+      - master
+  pull_request:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    name: Shell and rename tests
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      # The rename script rewrites every image reference in the repository with
+      # whole-word text substitution. When one of its guards is wrong it does
+      # not crash - it writes a plausible-looking file, the build stays green,
+      # and the first symptom is a machine that cannot upgrade. The tests cover
+      # the guards; they need no network, no podman and no root.
+      - name: Rename script tests
+        run: ./tests/set-image-name.test.sh
+
+      # ShellCheck is preinstalled on the GitHub runner images; the fallback is
+      # for self-hosted runners that do not carry it.
+      #
+      # --severity=warning is the bar: it catches the bugs (unquoted expansions
+      # that will word-split, misused test operators, unreachable code) without
+      # failing on style opinions. SC1090 is excluded because ShellCheck cannot
+      # follow "source" of a path it only learns at run time, which is what
+      # build.sh does when it reads /etc/os-release.
+      #
+      # The repository is green at this setting. If a new finding appears, it
+      # is worth reading before it is silenced.
+      - name: ShellCheck
+        run: |
+          set -euo pipefail
+          command -v shellcheck >/dev/null || sudo apt-get install -y shellcheck
+          shellcheck --severity=warning --exclude=SC1090 \
+            build_files/build.sh scripts/*.sh tests/*.sh
+
+      # None of these files is read by anything until much later: the workflows
+      # by GitHub, the disk_config ones halfway through an ISO build, and the
+      # two under sysfiles by the running machine - where a broken kargs.d file
+      # means a system that boots differently than intended and nothing says
+      # why. Parsing them here costs nothing.
+      - name: Parse the YAML and TOML files
+        run: |
+          set -euo pipefail
+          python3 - <<'EOF'
+          import glob, tomllib, yaml
+
+          yml = glob.glob(".github/**/*.yml", recursive=True) \
+              + glob.glob("build_files/sysfiles/**/*.yaml", recursive=True)
+          toml = glob.glob("disk_config/*.toml") \
+              + glob.glob("build_files/sysfiles/**/*.toml", recursive=True)
+
+          for path in sorted(yml):
+              with open(path) as f:
+                  yaml.safe_load(f)
+              print("ok  ", path)
+
+          for path in sorted(toml):
+              with open(path, "rb") as f:
+                  tomllib.load(f)
+              print("ok  ", path)
+          EOF
