@@ -19,7 +19,7 @@ COPY build_files /
 ##   quay.io/fedora-ostree-desktops/kinoite:44         # Fedora KDE
 ##   quay.io/fedora/fedora-bootc:44                    # Fedora, no desktop
 ##   quay.io/centos-bootc/centos-bootc:stream10        # CentOS Stream
-FROM quay.io/fedora-ostree-desktops/silverblue:44
+FROM quay.io/fedora-ostree-desktops/silverblue:45
 
 ## The repository this image gets published to, passed in by the workflow.
 ## build.sh section 9c checks the scope of the signature policy it writes
