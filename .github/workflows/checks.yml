@@ -46,6 +46,14 @@ jobs:
       - name: Rename script tests
         run: ./tests/set-image-name.test.sh
 
+      # The disk.toml guard refuses to build a disk image while the password is
+      # still the placeholder. Its first version matched "changeme" anywhere in
+      # the file, including the comments that explain the placeholder, so it
+      # refused every disk build forever - a guard that can never be satisfied
+      # fails as quietly as one that never fires.
+      - name: Disk password guard tests
+        run: ./tests/build-disk-guard.test.sh
+
       # ShellCheck is preinstalled on the GitHub runner images; the fallback is
       # for self-hosted runners that do not carry it.
       #

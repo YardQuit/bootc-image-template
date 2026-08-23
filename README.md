@@ -293,12 +293,13 @@ unaffected: there Anaconda asks for a user at install time.
 
 ```bash
 ./tests/set-image-name.test.sh      # the rename script's guards
+./tests/build-disk-guard.test.sh    # the disk.toml placeholder-password guard
 shellcheck --severity=warning --exclude=SC1090 \
     build_files/build.sh scripts/*.sh tests/*.sh
 ```
 
-`.github/workflows/checks.yml` runs both on every push and pull request, along
-with a parse of every YAML and TOML file in the repository. It needs no
+`.github/workflows/checks.yml` runs all of them on every push and pull request,
+along with a parse of every YAML and TOML file in the repository. It needs no
 registry and no signing key, so unlike the image build it never skips.
 
 The rename tests run twice: once against the repository as it stands, and once
@@ -311,6 +312,12 @@ The rename script gets tests because of how it fails: it rewrites every image
 reference with whole-word text substitution, and when a guard is wrong it does
 not crash - it writes a plausible-looking file, the build stays green, and the
 first symptom is a machine that cannot upgrade.
+
+The `disk.toml` guard gets them for the mirror-image reason. Refusing the
+placeholder is the half that is obvious to test; letting a correctly configured
+file through is the half that breaks silently, and did - the first version
+matched `changeme` anywhere in the file, including the comments explaining what
+the placeholder is, so it refused every disk build forever.
 
 ## ISOs in CI
 

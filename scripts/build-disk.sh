@@ -31,7 +31,12 @@ fi
 # a qcow2 from it unedited and the result is a sudo-capable login whose
 # password is published in the repository - so stop here instead. The ISO does
 # not read this file at all: Anaconda asks for a user at install time.
-if [ "${CONFIG}" = "disk_config/disk.toml" ] && grep -q '"changeme"' "${CONFIG}"; then
+# Anchored to the password setting itself. The comments above it in disk.toml
+# quote "changeme" while explaining what the placeholder is, so an unanchored
+# match finds those as well - and then this refuses on every run, including
+# long after the password has been set properly.
+if [ "${CONFIG}" = "disk_config/disk.toml" ] \
+   && grep -qE '^[[:space:]]*password[[:space:]]*=[[:space:]]*"changeme"' "${CONFIG}"; then
     echo "Error: ${CONFIG} still has the placeholder password \"changeme\"." >&2
     echo >&2
     echo "That account is in wheel, so the disk image you are about to build" >&2
