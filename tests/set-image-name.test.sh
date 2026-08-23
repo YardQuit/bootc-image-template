@@ -30,9 +30,11 @@ trap 'rm -rf "${WORK}"' EXIT
 
 PASSED=0
 FAILED=0
+SKIPPED=0
 
 ok()   { printf '  ok    %s\n' "$1"; PASSED=$((PASSED + 1)); }
 bad()  { printf '  FAIL  %s\n' "$1"; FAILED=$((FAILED + 1)); }
+skip() { printf '  skip  %s\n' "$1"; SKIPPED=$((SKIPPED + 1)); }
 check() {  # $1 what, $2 got, $3 want
     if [ "$2" = "$3" ]; then ok "$1"; else bad "$1 - got '$2', wanted '$3'"; fi
 }
@@ -106,12 +108,31 @@ check "both workflows follow"             "$?" "0"
 # markers. Rewriting those turns the section that explains the placeholders
 # into a description of the reader's own image, and would make --check flag
 # its own documentation on every run.
-grep -q "starts life as the template's \`myimage\` and" "${T}/README.md"
-check "guarded README literals survive"   "$?" "0"
+if grep -q '<!-- template-literals -->' "${T}/README.md"; then
+    grep -q "starts life as the template's \`myimage\` and" "${T}/README.md"
+    check "guarded README literals survive"   "$?" "0"
+else
+    skip "guarded README literals survive - this README has no guarded block"
+fi
 
-# Everywhere else in the README the name is the reader's, and does follow.
-grep -q '^# Vaulted' "${T}/README.md"
-check "README prose is renamed"           "$?" "0"
+# Everywhere else in the README the name is the reader's, and does follow - the
+# title most visibly. Same caveat as the block above: a project that wrote its
+# own README has a title of its own choosing, with no image name in it for the
+# rename to rewrite, so there is nothing to assert. Judged on the original,
+# before the rename, by comparing its title against the name in use.
+readme_titled_after_image() {
+    local name
+    name="$(sed -n 's/^  IMAGE_NAME: "\(.*\)"$/\1/p' \
+            "${REPO}/.github/workflows/build.yml" | head -n1)"
+    [ -n "${name}" ] && head -n1 "${REPO}/README.md" | grep -qi "^# ${name}\$"
+}
+
+if readme_titled_after_image; then
+    grep -q '^# Vaulted' "${T}/README.md"
+    check "README prose is renamed"       "$?" "0"
+else
+    skip "README prose is renamed - this README is not titled after the image"
+fi
 
 before="$(fingerprint "${T}")"
 run "${T}" vaulted claudetest >/dev/null
@@ -216,7 +237,11 @@ check "writes nothing"                    "$(fingerprint "${T}")" "${before}"
 
 
 echo
-printf '%s passed, %s failed\n' "${PASSED}" "${FAILED}"
+if [ "${SKIPPED}" -gt 0 ]; then
+    printf '%s passed, %s failed, %s skipped\n' "${PASSED}" "${FAILED}" "${SKIPPED}"
+else
+    printf '%s passed, %s failed\n' "${PASSED}" "${FAILED}"
+fi
 [ "${FAILED}" -eq 0 ] || exit 1
 
 # Everything above ran against this repository as it stands. But these tests
