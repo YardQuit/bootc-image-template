@@ -35,15 +35,20 @@ stands, and every default below is a plain, commented line in
   image's name and repository URLs (kept in step by `set-image-name.sh`), so
   About pages and bug-report links point at you, not at the base - see "How
   the image identifies itself" below.
+- **Signed, verified updates.** CI signs every published image and the image
+  refuses to update to anything unsigned. This one needs something from you -
+  a cosign key pair, see "Signing" below - and the first build fails until it
+  has one.
 
 Commented examples, off by default, cover packages that install into `/opt`
 (1Password, MEGAsync), COPR repos, third-party repos, requiring a YubiKey for
-`sudo`, changing the firewalld default zone, and signature-verified updates
-(see "Signing" below).
+`sudo`, and changing the firewalld default zone.
 
 ## What you need
 
 - A GitHub repository (the workflows publish to that repository's `ghcr.io`).
+- `cosign`, once, to create the signing key pair the build requires - see
+  "Signing" below.
 - `podman` if you want to build locally. Nothing else is required for CI.
 
 ## Quick start
@@ -77,13 +82,23 @@ Commented examples, off by default, cover packages that install into `/opt`
    substitution rewrites prose too - and a name and owner that overlap each
    other as whole words.
 
-3. Choose a base image in `Containerfile`, and list the packages you want in
+3. Create your signing key pair - the build requires one, see "Signing"
+   below:
+
+   ```bash
+   cosign generate-key-pair
+   mv cosign.pub build_files/cosign.pub
+   ```
+
+   Then add the contents of `cosign.key` as a repository secret named
+   `SIGNING_SECRET`.
+4. Choose a base image in `Containerfile`, and list the packages you want in
    `build_files/rpm_packages`.
-4. Commit and push to your default branch. The build workflow triggers on
+5. Commit and push to your default branch. The build workflow triggers on
    `main` and `master` and publishes `ghcr.io/myorg/mydesktop:latest` from
    whichever is your repository's default; if yours is named something else,
    add it to the two branch lists in `.github/workflows/build.yml`.
-5. On the machine you want to run it:
+6. On the machine you want to run it:
 
    ```bash
    sudo bootc switch ghcr.io/myorg/mydesktop:latest
@@ -105,6 +120,7 @@ want to install it without logging in to `ghcr.io`.
 | `Containerfile` | The image recipe: which base image, and to run `build.sh`. |
 | `build_files/build.sh` | Everything done inside the image: copy files, install packages, enable services. |
 | `build_files/rpm_packages` | The package list, one per line. Comments allowed. |
+| `build_files/cosign.pub` | Your signing public key - you add this; updates are verified against it. |
 | `build_files/sysfiles/` | Files copied into the image, mirroring the real layout (`sysfiles/etc/foo` -> `/etc/foo`). |
 | `build_files/sysfiles/etc/skel/.config/emacs/` | Default per-user Emacs configuration, seeded into every new user account. |
 | `build_files/sysfiles/usr/lib/tmpfiles.d/10-image-var-dirs.conf` | Recreates the `/var` directories the installed packages expect, on every boot. |
@@ -367,18 +383,34 @@ Three things are deliberate about the layout:
 in terminal frames (`emacs -nw`, `emacsclient -t`) on Wayland; graphical Emacs
 does not need it.
 
-## Signing (optional)
+## Signing (required)
 
-The build workflow signs published images if you give it a key, and quietly
-skips signing if you don't.
+Images built from this template are signed, and the machines running them
+verify that signature before installing an update. Both halves are on by
+default, so a key pair is a prerequisite rather than an extra - without one
+the build fails on its first push.
 
 ```bash
 cosign generate-key-pair          # creates cosign.key and cosign.pub
 ```
 
+Then put the public half where the build looks for it, and the private half
+where the workflow looks for it:
+
+```bash
+mv cosign.pub build_files/cosign.pub    # commit this
+```
+
 Add the contents of `cosign.key` as a repository secret named
-`SIGNING_SECRET` (*Settings -> Secrets and variables -> Actions*), commit
-`cosign.pub`, and never commit `cosign.key` - `.gitignore` already excludes it.
+`SIGNING_SECRET` (*Settings -> Secrets and variables -> Actions*), and never
+commit `cosign.key` - `.gitignore` already excludes it.
+
+The template deliberately ships **no** key: yours is the only one that
+belongs in your image, so the first build of a fresh repository fails until
+you add it, with a message saying exactly this. CI also verifies each
+published image against the committed `build_files/cosign.pub`, so a key and
+a secret that drift apart show up as a red build rather than as machines that
+quietly cannot update.
 
 Others can then verify an image with:
 
@@ -386,39 +418,37 @@ Others can then verify an image with:
 cosign verify --key cosign.pub ghcr.io/myorg/myimage:latest
 ```
 
+If you would rather not sign at all, see "Building without signatures" below.
+
 ### Verifying updates on the running system
 
-Signing only helps if the machine checks the signature before installing an
-update. That is off by default: `bootc upgrade` will happily pull an unsigned
-image unless you tell it otherwise. Turning it on takes three things, and all
-three already sit in the template - two of them commented out, because they
-only make sense once you actually have a key.
+Signing on its own only helps whoever runs `cosign verify` by hand: `bootc
+upgrade` pulls an unsigned image happily unless the system is told to check.
+Three things make it check, and all three are active in the template:
 
-1. **Ship the public key and require a valid signature.** Uncomment section
-   9c in `build_files/build.sh` and the `COPY cosign.pub` line in the `ctx`
-   stage of `Containerfile` - they work as a pair, and the build stops on the
-   missing key file if you uncomment one without the other. The section
-   installs the key into the image and merges a `sigstoreSigned` rule for
-   your repository into the `/etc/containers/policy.json` the base already
-   provides (merged rather than replaced, so the defaults that let every
-   other image be pulled survive). `scripts/set-image-name.sh` keeps the
-   repository and key name in it up to date, and a check at the end of the
-   section fails the build if the rule ever stops matching your image.
+1. **Ship the public key and require a valid signature.** Section 9c of
+   `build_files/build.sh` installs `build_files/cosign.pub` into the image and
+   merges a `sigstoreSigned` rule for your repository into the
+   `/etc/containers/policy.json` the base provides (merged rather than
+   replaced, so the defaults that let every other image be pulled survive).
+   `scripts/set-image-name.sh` keeps the repository and key name in step, and
+   a check at the end of the section fails the build if the rule ever stops
+   matching your image.
 
 2. **Let containers/image look for the signature.** Already active - the
    template ships
    `build_files/sysfiles/etc/containers/registries.d/sigstore-attachments.yaml`,
    and `scripts/set-image-name.sh` keeps the repository in it up to date. It is
-   inert on its own: it only says "look for an attachment", never "require one",
-   so unsigned images keep pulling normally until step 1 is uncommented.
+   inert on its own: it only says "look for an attachment", never "require one"
+   - step 1 is what makes it a requirement.
 
    (containers/image reads this only from `/etc/containers/registries.d` - there
    is no `/usr` location, so it has to ship under `sysfiles/etc/`.)
 
-Two things worth knowing before you enable this:
+Two things worth knowing about running this way:
 
-* It makes verification **mandatory** for that repository. If signing ever
-  breaks, `bootc upgrade` refuses to install rather than silently accepting an
+* Verification is **mandatory** for that repository. If signing ever breaks,
+  `bootc upgrade` refuses to install rather than silently accepting an
   unverified image - which is the point, but it does mean a broken signing step
   now blocks updates.
 * cosign 3.x writes signatures in the OCI 1.1 referrers format, which
@@ -433,6 +463,19 @@ You can check the whole chain from any machine with podman, without rebooting:
 skopeo copy --policy /etc/containers/policy.json \
   docker://ghcr.io/myorg/myimage:latest dir:/tmp/verify-test
 ```
+
+### Building without signatures
+
+Signing can be switched off, but only as a pair - the image's demand for a
+signature and CI's production of one have to go together:
+
+1. comment out every command in section 9c of `build_files/build.sh`;
+2. comment out the three cosign steps in `.github/workflows/build.yml`.
+
+Drop only the first and the workflow still insists on a key nothing uses;
+drop only the second and every machine keeps demanding a signature nothing
+produces, which blocks updates entirely. Both files say the same at the spot
+where you make the edit.
 
 ## Graphical boot
 

@@ -2,5 +2,7 @@
 output/
 _build*/
 
-# Never commit your cosign private key
+# Never commit your cosign private key. The public half belongs in
+# build_files/cosign.pub, and is meant to be committed - the build installs it
+# so machines can verify the updates they pull.
 cosign.key

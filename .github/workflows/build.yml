@@ -179,8 +179,15 @@ jobs:
           esac
           echo "digest=${DIGEST}" >> "${GITHUB_OUTPUT}"
 
-      # Signing is optional. Without a SIGNING_SECRET the step prints a note and
-      # succeeds - see the README for how to create the key pair.
+      # Signing is required: the image ships a policy.json rule (build.sh
+      # section 9c) that makes "bootc upgrade" refuse anything unsigned, so an
+      # unsigned publish would produce an image no machine can update to. The
+      # steps below therefore fail rather than skip when the key is missing.
+      # See the README for how to create the key pair.
+      #
+      # To build without signatures, remove these three steps together with
+      # section 9c in build_files/build.sh - dropping either half alone leaves
+      # a system demanding a signature that nothing produces.
       - name: Install cosign
         if: >-
           github.event_name != 'pull_request' &&
@@ -209,8 +216,13 @@ jobs:
         run: |
           set -euo pipefail
           if [ -z "${COSIGN_PRIVATE_KEY}" ]; then
-            echo "No SIGNING_SECRET repository secret set - skipping signing."
-            exit 0
+            echo "No SIGNING_SECRET repository secret set." >&2
+            echo "This image requires signed updates: publishing it unsigned" >&2
+            echo "would leave every machine unable to upgrade to it. Create a" >&2
+            echo "key pair (see the README's Signing section) and add the" >&2
+            echo "private half as the SIGNING_SECRET secret, or remove the" >&2
+            echo "signing steps here along with section 9c of build.sh." >&2
+            exit 1
           fi
 
           # The push step logged podman in, but podman keeps its credentials in
@@ -221,8 +233,26 @@ jobs:
           # even though the image itself pushed fine moments earlier. Passing
           # them as flags keeps them scoped to this one command and writes no
           # credential file to the runner.
+          IMAGE_DIGEST="${{ steps.build.outputs.image_registry }}/${{ steps.build.outputs.image_name }}@${{ steps.push.outputs.digest }}"
+
           cosign sign -y \
             --registry-username "${GITHUB_ACTOR}" \
             --registry-password "${REGISTRY_TOKEN}" \
             --key env://COSIGN_PRIVATE_KEY \
-            "${{ steps.build.outputs.image_registry }}/${{ steps.build.outputs.image_name }}@${{ steps.push.outputs.digest }}"
+            "${IMAGE_DIGEST}"
+
+          # Verify with the public key the image actually carries. SIGNING_SECRET
+          # and the committed cosign.pub are set in two different places, and
+          # nothing else checks that they are halves of the same pair - a repo
+          # key committed in one repository and a secret set in another are easy
+          # to get out of step - rotating one and forgetting the other produces
+          # images that sign fine here and are then rejected by every machine
+          # that tries to upgrade. Checking here turns that into a red build now
+          # instead of a stuck fleet later.
+          cosign verify \
+            --registry-username "${GITHUB_ACTOR}" \
+            --registry-password "${REGISTRY_TOKEN}" \
+            --key build_files/cosign.pub \
+            --insecure-ignore-tlog=true \
+            "${IMAGE_DIGEST}" > /dev/null
+          echo "Signature verifies against the committed cosign.pub."

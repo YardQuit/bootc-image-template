@@ -537,57 +537,90 @@ lsinitrd -m "${INITRAMFS}" | tr ' ' '\n' | grep -qx plymouth
 
 ### 9c. Verify our own updates ##############################################
 ##
-## Ready to use once you have a signing key - uncomment the commands below
-## AND the "COPY cosign.pub" line in the Containerfile, or the build stops
-## at the missing /ctx/cosign.pub.
+## Signed updates are on by default, which makes a signing key a
+## prerequisite rather than an extra: the build needs your public key at
+## build_files/cosign.pub, and the workflow needs the matching private half
+## as the SIGNING_SECRET secret. Without them the build fails - deliberately
+## and early, rather than publishing an image no machine can update to. The
+## README's Signing section shows how to create the pair.
 ##
-## The workflow signs each published image when the SIGNING_SECRET secret is
-## set, but signing alone changes nothing on the machine: "bootc upgrade"
-## pulls unsigned images happily unless the system is told to check. That
-## takes three things: the public key in the image, a registries.d entry
-## telling containers/image to look for a sigstore attachment (shipped in
-## sysfiles, inert on its own), and the policy.json rule below that turns
-## "look" into "require". The README's Signing section tells the whole
-## story, including how to create the key pair.
+## The key is yours alone, so the template ships without one: a repository
+## created from it fails its first build until you add yours. That is the
+## intended greeting, not a bug - the check below says so in as many words.
 ##
-## Before you enable it, know what you are switching on:
-##  * Verification becomes MANDATORY for this repository. If signing ever
-##    breaks, "bootc upgrade" refuses to install rather than accept an
-##    unverified image - which is the point, but a broken signing step then
-##    blocks updates until fixed.
+## Signing alone would change nothing on the machine: "bootc upgrade" pulls
+## unsigned images happily unless the system is told to check. That takes
+## three things - the public key in the image, a registries.d entry telling
+## containers/image to look for a sigstore attachment (shipped in sysfiles,
+## inert on its own), and the policy.json rule below that turns "look" into
+## "require".
+##
+## What this commits you to:
+##  * Verification is MANDATORY for this repository. If signing ever breaks,
+##    "bootc upgrade" refuses to install rather than accept an unverified
+##    image - which is the point, but a broken signing step then blocks
+##    updates until it is fixed.
 ##  * The signature must stay in the format containers/image can read -
 ##    build.yml pins cosign to the 2.x series for exactly that reason.
+##
+## TO BUILD WITHOUT SIGNATURE VERIFICATION, comment out two things together -
+## either one alone leaves the system in a worse state than both:
+##   1. every command in this section (the key check, the key install, the
+##      policy.json merge, and the check that follows them);
+##   2. the three cosign steps in .github/workflows/build.yml.
+## Comment out only (1) and the workflow still demands a key it no longer
+## needs; comment out only (2) and every machine keeps demanding a signature
+## nothing produces, which blocks updates completely.
 
-# install -Dm0644 /ctx/cosign.pub /etc/pki/containers/myimage.pub
+if [ ! -f "${CTX}/cosign.pub" ]; then
+    echo "ERROR: build_files/cosign.pub is missing." >&2
+    echo >&2
+    echo "This image verifies its own updates, so it needs YOUR signing key -" >&2
+    echo "the template ships without one on purpose. To add yours:" >&2
+    echo >&2
+    echo "  cosign generate-key-pair" >&2
+    echo "  mv cosign.pub build_files/cosign.pub    # commit this" >&2
+    echo "                                          # never commit cosign.key" >&2
+    echo >&2
+    echo "Then add the contents of cosign.key as a repository secret named" >&2
+    echo "SIGNING_SECRET (Settings -> Secrets and variables -> Actions), so" >&2
+    echo "the workflow can sign what this key verifies." >&2
+    echo >&2
+    echo "To build without signature verification instead, see the comment" >&2
+    echo "above this check - two blocks have to go, not one." >&2
+    exit 1
+fi
+
+install -Dm0644 /ctx/cosign.pub /etc/pki/containers/myimage.pub
 
 ## policy.json already exists in the base image, so merge into it rather
 ## than ship a replacement through sysfiles - overwriting it wholesale would
 ## drop the defaults that let every other image still be pulled.
 
-# python3 - <<'POLICY'
-# import json, pathlib
-# path = pathlib.Path("/etc/containers/policy.json")
-# policy = json.loads(path.read_text())
-# policy.setdefault("transports", {}).setdefault("docker", {})[
-#     "ghcr.io/myorg/myimage"
-# ] = [
-#     {
-#         "type": "sigstoreSigned",
-#         "keyPath": "/etc/pki/containers/myimage.pub",
-#         # A cosign signature carries only a repository, never a tag, so
-#         # matchRepository is the only identity check that can succeed.
-#         # The default (matchRepoDigestOrExact) rejects every signature.
-#         "signedIdentity": {"type": "matchRepository"},
-#     }
-# ]
-# path.write_text(json.dumps(policy, indent=4) + "\n")
-# POLICY
+python3 - <<'POLICY'
+import json, pathlib
+path = pathlib.Path("/etc/containers/policy.json")
+policy = json.loads(path.read_text())
+policy.setdefault("transports", {}).setdefault("docker", {})[
+    "ghcr.io/myorg/myimage"
+] = [
+    {
+        "type": "sigstoreSigned",
+        "keyPath": "/etc/pki/containers/myimage.pub",
+        # A cosign signature carries only a repository, never a tag, so
+        # matchRepository is the only identity check that can succeed.
+        # The default (matchRepoDigestOrExact) rejects every signature.
+        "signedIdentity": {"type": "matchRepository"},
+    }
+]
+path.write_text(json.dumps(policy, indent=4) + "\n")
+POLICY
 
 ## Prove the rule really landed for this image's repository - a rename that
 ## only half-updated these lines would otherwise ship a policy that guards
 ## the wrong name while the build stays green.
 
-# python3 -c 'import json; p = json.load(open("/etc/containers/policy.json")); assert "ghcr.io/myorg/myimage" in p["transports"]["docker"], "policy rule missing"'
+python3 -c 'import json; p = json.load(open("/etc/containers/policy.json")); assert "ghcr.io/myorg/myimage" in p["transports"]["docker"], "policy rule missing"'
 
 ### 10. Directories that must exist at boot ##################################
 ##
