@@ -301,6 +301,12 @@ shellcheck --severity=warning --exclude=SC1090 \
 with a parse of every YAML and TOML file in the repository. It needs no
 registry and no signing key, so unlike the image build it never skips.
 
+The rename tests run twice: once against the repository as it stands, and once
+against a copy renamed to something else. That second pass is how they run for
+you - a repository created from this template was renamed on day one, and a
+test that assumed the template's own name was still in use would be red on your
+first push for a reason that has nothing to do with your changes.
+
 The rename script gets tests because of how it fails: it rewrites every image
 reference with whole-word text substitution, and when a guard is wrong it does
 not crash - it writes a plausible-looking file, the build stays green, and the

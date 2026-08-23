@@ -125,10 +125,14 @@ check "the second rename lands"           "$?" "0"
 echo
 echo "Renaming without an owner"
 T="$(tree nameonly)"
+# Read the owner rather than assume "myorg": these tests ship inside the
+# template, so they also run in repositories created from it, where the owner
+# was changed long ago.
+owner="$(sed -n 's|.*ghcr\.io/\([^/]*\)/.*|\1|p' "${T}/disk_config/iso.toml" | head -n1)"
 run "${T}" vaulted >/dev/null
-grep -q 'ghcr\.io/myorg/vaulted' "${T}/disk_config/iso.toml"
+grep -q "ghcr\.io/${owner}/vaulted" "${T}/disk_config/iso.toml"
 check "the owner is left alone"           "$?" "0"
-# "myorg" is still the owner in use here, so it is not a leftover.
+# The owner in use is never a leftover, whatever it is.
 check "--check passes"                    "$(run "${T}" --check)"            "0"
 
 
@@ -139,11 +143,22 @@ run "${CLEAN}" vaulted claudetest >/dev/null
 
 STALE="$(tree stale)"
 run "${STALE}" vaulted claudetest >/dev/null
-# The upstream versions of the files most likely to be synced for a fix.
+
+# What a file copied down from the template looks like: one carrying the
+# template's own placeholders. Produced by renaming a copy TO them, rather than
+# read out of this repository - which may itself have been renamed long ago, in
+# which case its files hold that name and there would be no placeholder left to
+# find. Renaming to the template's values reconstructs an upstream file from any
+# starting point.
+UPSTREAM="$(tree upstream)"
+check "a copy can be renamed to the template's values" \
+    "$(run "${UPSTREAM}" myimage myorg)" "0"
+
+# The files most likely to be synced down for a fix.
 for f in build_files/build.sh \
          build_files/sysfiles/etc/containers/registries.d/sigstore-attachments.yaml \
          build_files/sysfiles/etc/motd.d/10-welcome; do
-    cp "${REPO}/${f}" "${STALE}/${f}"
+    cp "${UPSTREAM}/${f}" "${STALE}/${f}"
 done
 
 check "--check catches them"              "$(run "${STALE}" --check)"        "1"
@@ -202,4 +217,22 @@ check "writes nothing"                    "$(fingerprint "${T}")" "${before}"
 
 echo
 printf '%s passed, %s failed\n' "${PASSED}" "${FAILED}"
-[ "${FAILED}" -eq 0 ]
+[ "${FAILED}" -eq 0 ] || exit 1
+
+# Everything above ran against this repository as it stands. But these tests
+# ship inside the template, so for everyone using it they run in a repository
+# renamed away from "myimage"/"myorg" - and a test that quietly assumed those
+# were still the values in use would be red on that user's first push, for a
+# reason having nothing to do with their code. So run the whole suite once more
+# in a renamed copy of this repository, which is the only way to notice.
+if [ "${TEMPLATE_TEST_RENAMED:-0}" = "0" ]; then
+    echo
+    echo "Second pass, in a copy renamed to zonkzonk/acmelabs - how these tests"
+    echo "run for anyone who created a repository from this template"
+    RENAMED="$(tree second-pass)"
+    if [ "$(run "${RENAMED}" zonkzonk acmelabs)" != "0" ]; then
+        echo "  FAIL  could not rename a copy for the second pass"
+        exit 1
+    fi
+    TEMPLATE_TEST_RENAMED=1 "${RENAMED}/tests/set-image-name.test.sh" || exit 1
+fi
