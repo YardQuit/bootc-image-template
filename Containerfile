@@ -21,6 +21,12 @@ COPY build_files /
 ##   quay.io/centos-bootc/centos-bootc:stream10        # CentOS Stream
 FROM quay.io/fedora-ostree-desktops/silverblue:44
 
+## The repository this image gets published to, passed in by the workflow.
+## build.sh section 9c checks the scope of the signature policy it writes
+## against this, so a policy that guards a repository you never publish to
+## cannot slip through. Empty for local builds, which skip that check.
+ARG IMAGE_REPO=""
+
 ## Run the build script.
 ##
 ##   --mount=type=bind,from=ctx  makes /ctx/build.sh and /ctx/rpm_packages readable

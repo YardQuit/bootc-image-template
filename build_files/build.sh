@@ -591,22 +591,59 @@ if [ ! -f "${CTX}/cosign.pub" ]; then
     exit 1
 fi
 
-install -Dm0644 /ctx/cosign.pub /etc/pki/containers/myimage.pub
+## The repository the policy rule guards, and the key it verifies against.
+## Both are rewritten by scripts/set-image-name.sh, so they follow a rename.
+POLICY_SCOPE="ghcr.io/myorg/myimage"
+POLICY_KEY="/etc/pki/containers/myimage.pub"
+
+install -Dm0644 "${CTX}/cosign.pub" "${POLICY_KEY}"
+
+## A policy rule only applies to the repository it names, and an image
+## published somewhere else simply matches no rule - which means it falls
+## back to the base default, "insecureAcceptAnything". Verification would
+## then be off, silently, with nothing anywhere reporting a problem. The
+## workflow passes the repository it really publishes to as IMAGE_REPO, so
+## the two can be compared here instead of taken on trust. This catches the
+## easy mistake: running set-image-name.sh without the optional owner
+## argument renames the image everywhere but leaves the owner as "myorg".
+##
+## Local builds pass no IMAGE_REPO and skip the comparison - there is no
+## registry involved to disagree with.
+if [ -n "${IMAGE_REPO:-}" ] && [ "${IMAGE_REPO}" != "${POLICY_SCOPE}" ]; then
+    echo "ERROR: the signature policy guards a different repository than" >&2
+    echo "the one this image is published to:" >&2
+    echo >&2
+    echo "  policy scope : ${POLICY_SCOPE}" >&2
+    echo "  published to : ${IMAGE_REPO}" >&2
+    echo >&2
+    echo "Machines would find no rule for the image they pull, fall back to" >&2
+    echo "accepting anything, and never verify a signature again. Line these" >&2
+    echo "up with:" >&2
+    echo >&2
+    echo "  ./scripts/set-image-name.sh <image-name> <github-owner>" >&2
+    echo >&2
+    echo "passing the owner as well - without it the owner half stays as it" >&2
+    echo "was and this is exactly what happens." >&2
+    exit 1
+fi
 
 ## policy.json already exists in the base image, so merge into it rather
 ## than ship a replacement through sysfiles - overwriting it wholesale would
 ## drop the defaults that let every other image still be pulled.
+##
+## python3 comes with every base this template lists; a base without it
+## needs this merge rewritten (jq, or a shell-side edit).
 
-python3 - <<'POLICY'
-import json, pathlib
+POLICY_SCOPE="${POLICY_SCOPE}" POLICY_KEY="${POLICY_KEY}" python3 - <<'POLICY'
+import json, os, pathlib
 path = pathlib.Path("/etc/containers/policy.json")
 policy = json.loads(path.read_text())
 policy.setdefault("transports", {}).setdefault("docker", {})[
-    "ghcr.io/myorg/myimage"
+    os.environ["POLICY_SCOPE"]
 ] = [
     {
         "type": "sigstoreSigned",
-        "keyPath": "/etc/pki/containers/myimage.pub",
+        "keyPath": os.environ["POLICY_KEY"],
         # A cosign signature carries only a repository, never a tag, so
         # matchRepository is the only identity check that can succeed.
         # The default (matchRepoDigestOrExact) rejects every signature.
@@ -616,11 +653,20 @@ policy.setdefault("transports", {}).setdefault("docker", {})[
 path.write_text(json.dumps(policy, indent=4) + "\n")
 POLICY
 
-## Prove the rule really landed for this image's repository - a rename that
-## only half-updated these lines would otherwise ship a policy that guards
-## the wrong name while the build stays green.
+## Prove the rule really landed, and that it points at a key that exists -
+## a policy naming a keyPath the image does not carry fails at upgrade time
+## on the machine, which is far too late to hear about it.
 
-python3 -c 'import json; p = json.load(open("/etc/containers/policy.json")); assert "ghcr.io/myorg/myimage" in p["transports"]["docker"], "policy rule missing"'
+POLICY_SCOPE="${POLICY_SCOPE}" POLICY_KEY="${POLICY_KEY}" python3 -c '
+import json, os, sys
+policy = json.load(open("/etc/containers/policy.json"))
+scope, key = os.environ["POLICY_SCOPE"], os.environ["POLICY_KEY"]
+rules = policy.get("transports", {}).get("docker", {}).get(scope)
+if not rules:
+    sys.exit("policy rule missing for %s" % scope)
+if rules[0].get("keyPath") != key or not os.path.exists(key):
+    sys.exit("policy key %s missing or not installed" % key)
+'
 
 ### 10. Directories that must exist at boot ##################################
 ##

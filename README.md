@@ -86,7 +86,7 @@ Commented examples, off by default, cover packages that install into `/opt`
    below:
 
    ```bash
-   cosign generate-key-pair
+   cosign generate-key-pair          # press Enter twice for no passphrase
    mv cosign.pub build_files/cosign.pub
    ```
 
@@ -388,11 +388,16 @@ does not need it.
 Images built from this template are signed, and the machines running them
 verify that signature before installing an update. Both halves are on by
 default, so a key pair is a prerequisite rather than an extra - without one
-the build fails on its first push.
+the build fails, on pull requests and nightly runs as much as on a push.
 
 ```bash
 cosign generate-key-pair          # creates cosign.key and cosign.pub
 ```
+
+Press Enter twice when it asks for a passphrase. CI has no terminal to type
+one into, so a passphrase-protected key fails to sign with an error that
+never mentions passphrases - if you do want one, add it as a second
+repository secret named `SIGNING_SECRET_PASSWORD`.
 
 Then put the public half where the build looks for it, and the private half
 where the workflow looks for it:
@@ -407,15 +412,16 @@ commit `cosign.key` - `.gitignore` already excludes it.
 
 The template deliberately ships **no** key: yours is the only one that
 belongs in your image, so the first build of a fresh repository fails until
-you add it, with a message saying exactly this. CI also verifies each
-published image against the committed `build_files/cosign.pub`, so a key and
+you add it, with a message saying exactly this. CI also checks that
+`SIGNING_SECRET` really is the private half of the committed
+`build_files/cosign.pub` - before it builds or pushes anything - so a key and
 a secret that drift apart show up as a red build rather than as machines that
 quietly cannot update.
 
 Others can then verify an image with:
 
 ```bash
-cosign verify --key cosign.pub ghcr.io/myorg/myimage:latest
+cosign verify --key build_files/cosign.pub ghcr.io/myorg/myimage:latest
 ```
 
 If you would rather not sign at all, see "Building without signatures" below.
@@ -470,7 +476,8 @@ Signing can be switched off, but only as a pair - the image's demand for a
 signature and CI's production of one have to go together:
 
 1. comment out every command in section 9c of `build_files/build.sh`;
-2. comment out the three cosign steps in `.github/workflows/build.yml`.
+2. comment out the three cosign steps in `.github/workflows/build.yml`
+   ("Install cosign", "Check signing key" and "Sign image").
 
 Drop only the first and the workflow still insists on a key nothing uses;
 drop only the second and every machine keeps demanding a signature nothing

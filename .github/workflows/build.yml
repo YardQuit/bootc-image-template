@@ -77,6 +77,85 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
+      # Signing is required: the image ships a policy.json rule (build.sh
+      # section 9c) that makes "bootc upgrade" refuse anything unsigned, so an
+      # unsigned publish would produce an image no machine can update to. The
+      # cosign steps therefore fail rather than skip when the key is missing.
+      # See the README for how to create the key pair.
+      #
+      # cosign is installed and the key checked BEFORE the image is built and
+      # pushed, on purpose: a key problem found after the push would leave an
+      # unsigned :latest in the registry that every machine then refuses -
+      # a red build and a stuck fleet. Failing here costs nothing but a job.
+      #
+      # To build without signatures, remove the three cosign steps - "Install
+      # cosign", "Check signing key" and "Sign image" - together with section
+      # 9c in build_files/build.sh. Dropping either half alone leaves a system
+      # demanding a signature that nothing produces.
+      - name: Install cosign
+        if: >-
+          github.event_name != 'pull_request' &&
+          (github.event_name == 'schedule' ||
+           github.ref == format('refs/heads/{0}', github.event.repository.default_branch))
+        uses: sigstore/cosign-installer@v4.1.2
+        with:
+          # Pinned to the 2.x series on purpose. cosign 3.x (the action's
+          # default) writes the signature as an OCI 1.1 referrers attachment,
+          # tagged "sha256-<digest>". containers/image - what "bootc upgrade"
+          # uses on the running system - only looks for the older
+          # "sha256-<digest>.sig" tag, so a 3.x signature is invisible to it
+          # and a sigstoreSigned policy can never be satisfied. Revisit once
+          # containers/image learns to read referrers.
+          cosign-release: 'v2.6.5'
+
+      - name: Check signing key
+        if: >-
+          github.event_name != 'pull_request' &&
+          (github.event_name == 'schedule' ||
+           github.ref == format('refs/heads/{0}', github.event.repository.default_branch))
+        env:
+          COSIGN_PRIVATE_KEY: ${{ secrets.SIGNING_SECRET }}
+          # Empty unless you set it. cosign generate-key-pair with an empty
+          # passphrase (press Enter twice) needs no value here; a key you gave
+          # a passphrase needs it as a second secret.
+          COSIGN_PASSWORD: ${{ secrets.SIGNING_SECRET_PASSWORD }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${COSIGN_PRIVATE_KEY}" ]; then
+            echo "No SIGNING_SECRET repository secret set." >&2
+            echo "This image requires signed updates: publishing it unsigned" >&2
+            echo "would leave every machine unable to upgrade to it. Create a" >&2
+            echo "key pair (see the README's Signing section) and add the" >&2
+            echo "private half as the SIGNING_SECRET secret, or remove the" >&2
+            echo "cosign steps here along with section 9c of build.sh." >&2
+            exit 1
+          fi
+
+          # The two halves live in different places - the public key committed
+          # in the repository, the private one in a secret - and nothing keeps
+          # them in step. Rotate or replace one and forget the other and every
+          # signature verifies against the wrong key. cosign can derive the
+          # public key from the private one, so the pair can be checked here,
+          # before anything is published.
+          if ! cosign public-key --key env://COSIGN_PRIVATE_KEY > /tmp/derived.pub; then
+            echo "Could not read SIGNING_SECRET as a cosign private key." >&2
+            echo "If the key has a passphrase, add it as the secret" >&2
+            echo "SIGNING_SECRET_PASSWORD; otherwise regenerate the pair with" >&2
+            echo "an empty passphrase (press Enter twice)." >&2
+            exit 1
+          fi
+          if ! diff -q /tmp/derived.pub build_files/cosign.pub > /dev/null; then
+            echo "SIGNING_SECRET does not match build_files/cosign.pub." >&2
+            echo "The image verifies updates against the committed public key," >&2
+            echo "so signatures made with this secret would be rejected by" >&2
+            echo "every machine. Commit the cosign.pub belonging to this key," >&2
+            echo "or set SIGNING_SECRET to the private half of the committed" >&2
+            echo "one." >&2
+            exit 1
+          fi
+          echo "SIGNING_SECRET matches build_files/cosign.pub."
+
       - name: Build image
         id: build
         run: |
@@ -121,7 +200,17 @@ jobs:
           )
 
           # --format docker keeps compatibility with tools that don't read OCI.
-          podman build --file ./Containerfile --format docker "${ARGS[@]}" .
+          #
+          # IMAGE_REPO tells build.sh which repository this image will actually
+          # be published to, so section 9c can check that against the scope of
+          # the policy.json rule it writes. They are set in different places -
+          # the scope in build.sh, the destination here from the repository
+          # owner - and a rule scoped to a repository that is never published
+          # matches nothing, which silently accepts unsigned images instead of
+          # rejecting them.
+          podman build --file ./Containerfile --format docker \
+            --build-arg "IMAGE_REPO=${IMAGE_REGISTRY}/${IMAGE_NAME}" \
+            "${ARGS[@]}" .
 
           # Hand the values to the next steps.
           {
@@ -179,31 +268,6 @@ jobs:
           esac
           echo "digest=${DIGEST}" >> "${GITHUB_OUTPUT}"
 
-      # Signing is required: the image ships a policy.json rule (build.sh
-      # section 9c) that makes "bootc upgrade" refuse anything unsigned, so an
-      # unsigned publish would produce an image no machine can update to. The
-      # steps below therefore fail rather than skip when the key is missing.
-      # See the README for how to create the key pair.
-      #
-      # To build without signatures, remove these three steps together with
-      # section 9c in build_files/build.sh - dropping either half alone leaves
-      # a system demanding a signature that nothing produces.
-      - name: Install cosign
-        if: >-
-          github.event_name != 'pull_request' &&
-          (github.event_name == 'schedule' ||
-           github.ref == format('refs/heads/{0}', github.event.repository.default_branch))
-        uses: sigstore/cosign-installer@v4.1.2
-        with:
-          # Pinned to the 2.x series on purpose. cosign 3.x (the action's
-          # default) writes the signature as an OCI 1.1 referrers attachment,
-          # tagged "sha256-<digest>". containers/image - what "bootc upgrade"
-          # uses on the running system - only looks for the older
-          # "sha256-<digest>.sig" tag, so a 3.x signature is invisible to it
-          # and a sigstoreSigned policy can never be satisfied. Revisit once
-          # containers/image learns to read referrers.
-          cosign-release: 'v2.6.5'
-
       - name: Sign image
         if: >-
           github.event_name != 'pull_request' &&
@@ -211,20 +275,16 @@ jobs:
            github.ref == format('refs/heads/{0}', github.event.repository.default_branch))
         env:
           COSIGN_PRIVATE_KEY: ${{ secrets.SIGNING_SECRET }}
+          COSIGN_PASSWORD: ${{ secrets.SIGNING_SECRET_PASSWORD }}
           # cosign authenticates separately from podman - see below.
           REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          if [ -z "${COSIGN_PRIVATE_KEY}" ]; then
-            echo "No SIGNING_SECRET repository secret set." >&2
-            echo "This image requires signed updates: publishing it unsigned" >&2
-            echo "would leave every machine unable to upgrade to it. Create a" >&2
-            echo "key pair (see the README's Signing section) and add the" >&2
-            echo "private half as the SIGNING_SECRET secret, or remove the" >&2
-            echo "signing steps here along with section 9c of build.sh." >&2
-            exit 1
-          fi
 
+          # The secret is present and matches the committed public key - the
+          # "Check signing key" step above proved both before anything was
+          # built or pushed.
+          #
           # The push step logged podman in, but podman keeps its credentials in
           # ${XDG_RUNTIME_DIR}/containers/auth.json and cosign never looks there
           # - it uses the Docker keychain (~/.docker/config.json). Without
@@ -241,9 +301,9 @@ jobs:
             --key env://COSIGN_PRIVATE_KEY \
             "${IMAGE_DIGEST}"
 
-          # Verify with the public key the image actually carries. SIGNING_SECRET
-          # and the committed cosign.pub are set in two different places, and
-          # nothing else checks that they are halves of the same pair - a repo
+          # Verify what actually landed in the registry, with the public key
+          # the image carries. The pair was checked before the push; this
+          # proves the signature really uploaded and reads back - a repo
           # key committed in one repository and a secret set in another are easy
           # to get out of step - rotating one and forgetting the other produces
           # images that sign fine here and are then rejected by every machine

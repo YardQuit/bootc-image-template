@@ -48,9 +48,9 @@ FILES=(
     "build_files/sysfiles/etc/motd.d/10-welcome"
     # These two carry the published image reference. Leave them out and a
     # rename silently scopes signature verification to the old repository,
-    # so updates from the new one stop being checked at all. build_files/build.sh
-    # is listed for the same reason once you paste in the policy.json block from
-    # the README.
+    # so updates from the new one stop being checked at all - build.sh
+    # section 9c writes that scope into the image's policy.json on every
+    # build, so it has to be renamed along with everything else.
     "build_files/build.sh"
     "build_files/sysfiles/etc/containers/registries.d/sigstore-attachments.yaml"
     "scripts/build.sh"
