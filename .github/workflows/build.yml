@@ -165,14 +165,16 @@ jobs:
           # signature verifies against the wrong key. cosign can derive the
           # public key from the private one, so the pair can be checked here,
           # before anything is published.
-          if ! cosign public-key --key env://COSIGN_PRIVATE_KEY > /tmp/derived.pub; then
+          if ! cosign public-key --key env://COSIGN_PRIVATE_KEY \
+               > "${RUNNER_TEMP}/derived.pub"; then
             echo "Could not read SIGNING_SECRET as a cosign private key." >&2
             echo "If the key has a passphrase, add it as the secret" >&2
             echo "SIGNING_SECRET_PASSWORD; otherwise regenerate the pair with" >&2
             echo "an empty passphrase (press Enter twice)." >&2
             exit 1
           fi
-          if ! diff -q /tmp/derived.pub build_files/cosign.pub > /dev/null; then
+          if ! diff -q "${RUNNER_TEMP}/derived.pub" build_files/cosign.pub \
+               > /dev/null; then
             echo "SIGNING_SECRET does not match build_files/cosign.pub." >&2
             echo "The image verifies updates against the committed public key," >&2
             echo "so signatures made with this secret would be rejected by" >&2

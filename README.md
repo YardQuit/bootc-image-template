@@ -675,12 +675,59 @@ Two things worth knowing about running this way:
   *"A signature was required, but no signature exists"* even though the image is
   signed.
 
-You can check the whole chain from any machine with podman, without rebooting:
+You can check the whole chain from any machine with skopeo, without rebooting -
+but not by pointing it at that machine's own `/etc/containers/policy.json`.
+That is the *host's* policy, and on an ordinary machine it is
+`insecureAcceptAnything` for everything, so the copy succeeds whether the image
+was signed or not. (It may not even be at that path: the default moved to
+`/usr/share/containers/policy.json` in containers-common 0.69, which is why
+section 9c of `build.sh` merges into whichever of the two it finds.)
+
+Write the two files the check actually needs instead - a policy that requires
+the signature, and the registries.d entry that sends containers/image looking
+for it:
 
 ```bash
-skopeo copy --policy /etc/containers/policy.json \
-  docker://ghcr.io/myorg/myimage:latest dir:/tmp/verify-test
+mkdir -p /tmp/verify/registries.d && cd /tmp/verify
+cp /path/to/your/repo/build_files/cosign.pub .
+
+cat > policy.json <<'EOF'
+{
+  "default": [{ "type": "reject" }],
+  "transports": {
+    "docker": {
+      "ghcr.io/myorg/myimage": [
+        {
+          "type": "sigstoreSigned",
+          "keyPath": "/tmp/verify/cosign.pub",
+          "signedIdentity": { "type": "matchRepository" }
+        }
+      ]
+    }
+  }
+}
+EOF
+
+cat > registries.d/ghcr.yaml <<'EOF'
+docker:
+  ghcr.io/myorg/myimage:
+    use-sigstore-attachments: true
+EOF
+
+skopeo --policy policy.json --registries.d registries.d \
+  copy docker://ghcr.io/myorg/myimage:latest dir:./copy
 ```
+
+An unsigned image, one signed with a different key, or one whose signature the
+registry never received all fail the same way:
+
+```
+FATA[0000] Source image rejected: A signature was required, but no signature exists
+```
+
+That is the same refusal `bootc upgrade` gives on a machine running the image,
+which is the point of doing it this way: it is the running system's own check,
+made by hand.
 
 ### Building without signatures
 

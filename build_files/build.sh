@@ -318,17 +318,22 @@ rm -f /etc/skel/.emacs
 
 ### 7. Clean up #############################################################
 ##
-## Keeps the image small; the metadata is rebuilt on the running system anyway.
-if command -v dnf5 >/dev/null 2>&1; then
-    dnf5 -y clean all
-else
-    dnf -y clean all
-fi
-
-## dnf also leaves repo metadata and lock files behind in /var and /run. Both are
-## runtime state rather than image content, and "bootc container lint" flags them
-## as "content in runtime-only directories" and "content in /var missing
-## systemd tmpfiles.d entries".
+## There is no "dnf clean all" here, and that is deliberate. The Containerfile
+## mounts /var/cache and /var/log as build caches, so dnf's downloads and logs
+## never become part of a layer at all - there is nothing there for a clean to
+## shrink. What it would do is empty the cache those mounts exist to keep, so
+## the next local build re-downloads every package and every repository index
+## it had just fetched.
+##
+## Put it back if you drop the two --mount=type=cache lines from the
+## Containerfile: without them /var/cache is ordinary image content, and a few
+## hundred megabytes of it.
+##
+## What does end up in the image is what dnf leaves outside those mounts: repo
+## metadata under /var/lib/dnf and lock files under /run. Both are runtime state
+## rather than image content, and "bootc container lint" flags them as "content
+## in runtime-only directories" and "content in /var missing systemd tmpfiles.d
+## entries".
 rm -rf /var/lib/dnf /run/dnf
 
 ### 8. Enable systemd units #################################################
@@ -593,7 +598,27 @@ fi
 ## An initramfs without plymouth boots to a text console and nothing warns you,
 ## so check rather than hope. This one has to be able to read the file: it is the
 ## one dracut just wrote.
-lsinitrd -m "${INITRAMFS}" | tr ' ' '\n' | grep -qx plymouth
+##
+## The list is captured before it is searched rather than piped straight into
+## grep. "grep -qx" exits at its first match and closes the pipe; lsinitrd and
+## tr then die of SIGPIPE, and under "set -o pipefail" that becomes the status
+## of the whole pipeline - so a successful match reads as a failed one. The
+## list is small enough today that it is written before grep ever exits, which
+## makes this luck rather than a guarantee.
+##
+## And say what went wrong. As a bare assertion this failed the build with no
+## output at all: the last thing in the log was dracut's, and nothing anywhere
+## named plymouth.
+INITRAMFS_MODULES="$(lsinitrd -m "${INITRAMFS}" | tr ' ' '\n')"
+if ! grep -qx plymouth <<<"${INITRAMFS_MODULES}"; then
+    echo "ERROR: the initramfs at ${INITRAMFS} carries no plymouth module," >&2
+    echo "so this image would boot to a text console rather than a splash" >&2
+    echo "screen. dracut ran but did not pick plymouth up: check that plymouth" >&2
+    echo "and plymouth-system-theme are installed. Both are in rpm_packages," >&2
+    echo "and section 3 records any name the base's repositories do not carry" >&2
+    echo "in /usr/share/image-build/skipped-packages." >&2
+    exit 1
+fi
 
 ### 9c. Verify our own updates ##############################################
 ##

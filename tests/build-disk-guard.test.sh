@@ -70,7 +70,15 @@ guard_fired() {  # $1 tree, $2 disk type
     out="$( cd "$1" && ./scripts/build-disk.sh --check "$2" 2>&1 )" || rc=$?
 
     if grep -q "placeholder password" <<<"${out}"; then
-        printf 'yes'
+        # Printing the message is not the guard working - stopping the build is.
+        # A guard that says its piece and then goes on to build the image is
+        # precisely the failure this file exists to catch, so that gets its own
+        # answer rather than passing as "yes".
+        if [ "${rc}" -ne 0 ]; then
+            printf 'yes'
+        else
+            printf 'yes(but exit 0)'
+        fi
     elif [ "${rc}" -ne 0 ]; then
         # Neither outcome: the script failed for some other reason. Reporting
         # that as "no" would let every case that expects the guard to stay

@@ -50,8 +50,8 @@
 #   - running at all while the current name and owner already overlap, or
 #     while either is "donkey" - those need a hand-edit first, and the
 #     error says exactly what to do;
-#   - an owner change when the current owner cannot be read from
-#     disk_config/iso.toml - there would be nothing to substitute.
+#   - an owner change when no ghcr.io/<owner>/<image> reference is left to
+#     read the current owner from - there would be nothing to substitute.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -113,20 +113,52 @@ guarded_view() {  # $1: file
     sed -e "\\#${LITERAL_BEGIN}#,\\#${LITERAL_END}#s/.*//" -- "$1"
 }
 
-# The name and owner in use right now: build.yml is the source of truth for
-# the name, and the ISO kickstart's ghcr.io/<owner>/<image> for the owner.
-# iso.toml is optional (the rewrite loop tolerates its absence), so a missing
-# file just means the owner is unknown rather than an error here.
+# The name and owner in use right now. build.yml is the source of truth for the
+# name. The owner has no such file, so it is read from every
+# ghcr.io/<owner>/<image> reference in the files above at once.
+#
+# Reading it from a single file is what this used to do - the ISO kickstart in
+# disk_config/iso.toml - and that is one of the files a repository copies down
+# from the template when it wants an upstream fix. Copy it down and the owner
+# reads back as the placeholder, which turned the documented repair into a dead
+# end: --check reported the leftovers but could not name the owner in the
+# command it suggested, and running that command with the right owner was
+# refused - "the owner ... already appears in files this script rewrites" -
+# because from here the real owner looked like a brand new value that happened
+# to be all over the repository. The only way out was a hand edit.
+#
+# So count the owners instead: drop the template's placeholder when any real
+# owner is there to be had, and take the value the most files agree on. One
+# copied-down file cannot outvote the rest.
 read_current_values() {
+    local file refs owners real
+
     OLD_NAME=$(sed -n 's/^  IMAGE_NAME: "\(.*\)"$/\1/p' .github/workflows/build.yml | head -n1)
     if [ -z "${OLD_NAME}" ]; then
         echo "Error: could not read IMAGE_NAME from .github/workflows/build.yml." >&2
         exit 1
     fi
 
+    # Read through guarded_view, for the same reason every other scan does: the
+    # README spells out ghcr.io/myorg/myimage between the literal markers to
+    # explain what a placeholder is, and that sentence must not get a vote.
+    refs=$({ for file in "${FILES[@]}"; do
+                 if [ -f "${file}" ]; then guarded_view "${file}"; fi
+             done; } | { grep -o -E 'ghcr\.io/[A-Za-z0-9._-]+/' || true; })
+    owners=$(cut -d/ -f2 <<<"${refs}")
+
     OLD_OWNER=""
-    if [ -f disk_config/iso.toml ]; then
-        OLD_OWNER=$(sed -n 's|.*ghcr\.io/\([^/]*\)/.*|\1|p' disk_config/iso.toml | head -n1)
+    if [ -n "${owners}" ]; then
+        real=$({ grep -v -i -x -F -e "${TEMPLATE_OWNER}" <<<"${owners}" || true; })
+        if [ -n "${real}" ]; then
+            owners="${real}"
+        fi
+        # uniq -c prefixes the count; the second sort orders by it, descending,
+        # with the name as a tiebreak so a tie is at least deterministic. awk
+        # rather than "head -n1" because head closes the pipe on its first line
+        # and the sort ahead of it dies of SIGPIPE under "set -o pipefail".
+        OLD_OWNER=$(sort <<<"${owners}" | uniq -c | sort -k1,1nr -k2,2 \
+                    | awk 'NR==1 {print $2}')
     fi
 }
 
@@ -194,10 +226,11 @@ check_placeholders() {
     done
 
     if [ -n "${hits}" ]; then
-        # The owner is read from disk_config/iso.toml, which is itself one of
-        # the files a template copy overwrites. When it reads back as the
-        # placeholder there is no owner to suggest - ask for one rather than
-        # print the placeholder as if it were the answer.
+        # The owner reads back as the placeholder only when every file that
+        # names one still says "myorg" - a repository copied down wholesale, or
+        # one that never changed its owner at all. Either way there is no owner
+        # to suggest, so ask for one rather than print the placeholder as if it
+        # were the answer.
         local owner_arg=" <github-owner>"
         if [ -n "${OLD_OWNER}" ] && [ "${OLD_OWNER,,}" != "${TEMPLATE_OWNER}" ]; then
             owner_arg=" ${OLD_OWNER}"
@@ -301,16 +334,17 @@ fi
 # so the two can never disagree about what "current" means.
 read_current_values
 
-# The script can only rewrite an owner it can locate. When iso.toml names no
-# ghcr.io owner (or the file is gone), a requested owner change has nothing
-# to substitute - and completing anyway would leave the user believing the
-# owner was set when no file received it. Refuse rather than silently
-# ignore the argument.
+# The script can only rewrite an owner it can locate. When not one of the files
+# above names a ghcr.io owner any more, a requested owner change has nothing to
+# substitute - and completing anyway would leave the user believing the owner
+# was set when no file received it. Refuse rather than silently ignore the
+# argument.
 if [ -n "${NEW_OWNER}" ] && [ -z "${OLD_OWNER}" ]; then
-    echo "Error: cannot change the owner - no ghcr.io/<owner>/... reference in" >&2
-    echo "disk_config/iso.toml to read the current owner from. Set the owner" >&2
-    echo "by hand where it appears (search the repository for ghcr.io), or" >&2
-    echo "restore the iso.toml reference and run this script again." >&2
+    echo "Error: cannot change the owner - no ghcr.io/<owner>/... reference is" >&2
+    echo "left in the files this script manages to read the current owner" >&2
+    echo "from. Set the owner by hand where it appears (search the repository" >&2
+    echo "for ghcr.io), or restore one of those references and run this script" >&2
+    echo "again." >&2
     exit 1
 fi
 

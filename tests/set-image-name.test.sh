@@ -190,10 +190,14 @@ UPSTREAM="$(tree upstream)"
 check "a copy can be renamed to the template's values" \
     "$(run "${UPSTREAM}" myimage myorg)" "0"
 
-# The files most likely to be synced down for a fix.
+# The files most likely to be synced down for a fix. iso.toml is in the list
+# for a reason beyond being one of them: the owner used to be read from that
+# one file and nowhere else, so a copy of it brought the placeholder back as
+# the answer to "who owns this repository?" - see read_current_values.
 for f in build_files/build.sh \
          build_files/sysfiles/etc/containers/registries.d/sigstore-attachments.yaml \
-         build_files/sysfiles/etc/motd.d/10-welcome; do
+         build_files/sysfiles/etc/motd.d/10-welcome \
+         disk_config/iso.toml; do
     cp "${UPSTREAM}/${f}" "${STALE}/${f}"
 done
 
@@ -213,6 +217,36 @@ check "every match starts its own line" "$?" "0"
 check "re-running the rename repairs"     "$(run "${STALE}" vaulted claudetest)" "0"
 check "--check passes afterwards"         "$(run "${STALE}" --check)"        "0"
 check "the repair equals a clean rename"  "$(fingerprint "${STALE}")" "$(fingerprint "${CLEAN}")"
+
+# The kickstart on its own, because it is the one file that used to decide who
+# the owner was. With the owner read from that file alone, a copy of it made
+# the script believe the owner had gone back to being the template's - so
+# --check could not name it, the repair it printed was refused as "the owner
+# ... already appears in files this script rewrites", and the rename with no
+# owner argument quietly wrote ghcr.io/myorg/<name> instead. All three are
+# checked here: what --check suggests, that the suggestion works, and that
+# repairing without an owner argument keeps the right one.
+ISO="$(tree stale-iso)"
+run "${ISO}" vaulted claudetest >/dev/null
+cp "${UPSTREAM}/disk_config/iso.toml" "${ISO}/disk_config/iso.toml"
+
+out="$( cd "${ISO}" && ./scripts/set-image-name.sh --check 2>&1 )"
+grep -q 'set-image-name\.sh vaulted claudetest$' <<<"${out}"
+check "--check names the owner it found"  "$?" "0"
+
+check "the suggested repair is accepted"  "$(run "${ISO}" vaulted claudetest)" "0"
+check "--check passes afterwards"         "$(run "${ISO}" --check)"            "0"
+check "it equals a clean rename"          "$(fingerprint "${ISO}")" "$(fingerprint "${CLEAN}")"
+
+# And the same repair with no owner argument at all - what the README tells
+# you to run, and the form that used to write the placeholder into the file.
+ISO2="$(tree stale-iso-noowner)"
+run "${ISO2}" vaulted claudetest >/dev/null
+cp "${UPSTREAM}/disk_config/iso.toml" "${ISO2}/disk_config/iso.toml"
+run "${ISO2}" vaulted >/dev/null
+grep -q 'ghcr\.io/claudetest/vaulted' "${ISO2}/disk_config/iso.toml"
+check "repairing without an owner keeps it" "$?" "0"
+check "it equals a clean rename too"      "$(fingerprint "${ISO2}")" "$(fingerprint "${CLEAN}")"
 
 
 echo
@@ -235,8 +269,18 @@ echo
 echo "Refusals"
 T="$(tree refuse)"
 before="$(fingerprint "${T}")"
-check "'donkey' is refused"               "$(run "${T}" donkey)"             "1"
-check "'emacs' is refused"                "$(run "${T}" emacs)"              "1"
+# These two are refused because they occur in build_files/build.sh, in the
+# Donkey Emacs package paths. A project built from this template is told to
+# delete that section; with it goes the collision, and there is then nothing to
+# refuse and nothing to assert. Judged on the file rather than assumed - the
+# same reasoning as the README cases further up.
+for word in donkey emacs; do
+    if grep -q -i -w -F -e "${word}" "${T}/build_files/build.sh"; then
+        check "'${word}' is refused"          "$(run "${T}" "${word}")"          "1"
+    else
+        skip "'${word}' is refused - this build.sh no longer mentions it"
+    fi
+done
 check "a name equal to the owner"         "$(run "${T}" zonk zonk)"          "1"
 check "a name ending in a dash"           "$(run "${T}" 'bad-')"             "1"
 check "an owner ending in a dash"         "$(run "${T}" good 'bad-')"        "1"

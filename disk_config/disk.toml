@@ -8,10 +8,17 @@
 mountpoint = "/"
 minsize = "20 GiB"
 
-# A separate /home is optional:
-# [[customizations.filesystem]]
-# mountpoint = "/home"
-# minsize = "10 GiB"
+# Only the root filesystem can be sized here, and that is a limit of the
+# builder rather than a style choice. Ask for a separate /home and
+# bootc-image-builder stops with
+#
+#   error: cannot generate manifest: the following errors occurred while
+#   validating custom mountpoints: path "/home" is not allowed
+#
+# and the mountpoints it does allow past that check are then dropped by the
+# image type's own validation - "blueprint validation failed for image type
+# "qcow2": customizations.filesystem: not supported" - which is a line in the
+# build log, not a failure. Split /home after installation instead.
 
 # A user to log in with. Without this you get a system you cannot sign in to,
 # so keep at least one user (or an SSH key).
@@ -37,5 +44,12 @@ password = "changeme"
 groups = ["wheel"]             # wheel = allowed to use sudo
 # key = "ssh-ed25519 AAAA... you@example.com"
 
-# [customizations]
-# hostname = "myimage"
+# A hostname does not belong here either: bootc-image-builder prints
+#
+#   blueprint validation failed for image type "qcow2":
+#   customizations.hostname: not supported
+#
+# and then carries on and exits 0, so the setting is dropped and the only sign
+# of it is that line scrolling past. Ship one in the image as
+# build_files/sysfiles/etc/hostname, or set it per machine afterwards with
+# "hostnamectl set-hostname".
