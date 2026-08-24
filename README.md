@@ -7,6 +7,32 @@ published to `ghcr.io`, and installed with `bootc switch` or from an ISO.
 Everything here is plain YAML, TOML and Bash - no build tool to install, no
 generated files, nothing hidden.
 
+<!-- toc -->
+
+- [What you get out of the box](#what-you-get-out-of-the-box)
+- [What you need](#what-you-need)
+- [Quick start](#quick-start)
+- [What each file does](#what-each-file-does)
+- [Customising the image](#customising-the-image)
+- [Packages that install into /opt](#packages-that-install-into-opt)
+- [How the image identifies itself](#how-the-image-identifies-itself)
+- [Building locally](#building-locally)
+- [Checks](#checks)
+  - [Removing the tests](#removing-the-tests)
+- [ISOs in CI](#isos-in-ci)
+- [Keeping machines up to date](#keeping-machines-up-to-date)
+- [Updating from the template](#updating-from-the-template)
+- [Emacs and Donkey](#emacs-and-donkey)
+- [Signing (required)](#signing-required)
+  - [Verifying updates on the running system](#verifying-updates-on-the-running-system)
+  - [Building without signatures](#building-without-signatures)
+- [Graphical boot](#graphical-boot)
+- [Deliberately not included](#deliberately-not-included)
+- [Why the workflows use podman directly](#why-the-workflows-use-podman-directly)
+- [License](#license)
+
+<!-- /toc -->
+
 ## What you get out of the box
 
 The template is not an empty shell - it builds a usable desktop image as it
@@ -138,7 +164,7 @@ rides the newest, so it can never be pruned away. Change
 | `scripts/set-image-name.sh` | Renames the image everywhere in this repository; `--check` reports placeholders the template left behind. |
 | `scripts/build.sh` | Builds the container locally. |
 | `scripts/build-disk.sh` | Builds an ISO or VM disk locally. |
-| `tests/set-image-name.test.sh` | Tests for the rename script. Needs no network, podman or root. |
+| `tests/` | Tests for the template's own scripts and README. Need no network, podman or root. |
 | `.github/workflows/build.yml` | Builds and publishes the container image, and prunes old versions. |
 | `.github/workflows/build-disk.yml` | Builds the installer ISO on demand. |
 | `.github/workflows/checks.yml` | ShellCheck, the rename tests, and a parse of every YAML and TOML file. |
@@ -324,6 +350,7 @@ shellcheck --severity=warning --exclude=SC1090 \
 | --- | --- |
 | `tests/set-image-name.test.sh` | The rename script's guards. |
 | `tests/build-disk-guard.test.sh` | The `disk.toml` placeholder-password guard. |
+| `tests/readme-toc.test.sh` | That this README's table of contents still matches its headings. |
 
 `.github/workflows/checks.yml` runs all of them on every push and pull request,
 along with a parse of every YAML and TOML file in the repository. It needs no
@@ -349,9 +376,9 @@ the placeholder is, so it refused every disk build forever.
 ### Removing the tests
 
 These test the template's own scripts - `set-image-name.sh` and
-`build-disk.sh` - which your project runs but does not edit. That makes them
-the template's furniture rather than yours, and deleting them is a reasonable
-first thing to do in a new project:
+`build-disk.sh` - which your project runs but does not edit, and this README's
+table of contents. That makes them the template's furniture rather than yours,
+and deleting them is a reasonable first thing to do in a new project:
 
 ```bash
 rm -rf tests/
