@@ -222,10 +222,17 @@ echo "${DONKEY_SHA256}  /etc/skel/.config/emacs/donkey/donkey.el" | sha256sum -c
 PACKAGES=$(grep -vE '^\s*(#|$)' "${CTX}/rpm_packages" | tr '\n' ' ')
 
 ## --skip-unavailable keeps the build going when a package is missing from the
-## repos. That is deliberate and worth keeping: a new Fedora release renames,
-## merges and drops packages, and a hard failure there would block the release
-## upgrade itself until every name in rpm_packages had been chased down. Better
-## to get the new base first and reconcile the list afterwards.
+## repos. That is deliberate and worth keeping: a new release renames, merges
+## and drops packages, and a hard failure there would block the base upgrade
+## itself until every name in rpm_packages had been chased down. Better to get
+## the new base first and reconcile the list afterwards.
+##
+## It only covers packages nothing else depends on, though. Section 8 enables
+## tuned, firewalld and crond by name, and section 9b asserts plymouth reached
+## the initramfs; lose one of those and the build still stops, just later and
+## with a less obvious message. That is the right trade - those four are load-
+## bearing here - but it means "the build survives a base bump" holds for the
+## long tail of the package list, not for all of it.
 ##
 ## The cost is that a missing package is otherwise invisible - the build stays
 ## green and the tool is simply absent on the machine. So write down what did
@@ -483,9 +490,14 @@ os_release_set() {
 ## number, drop its edition label. Read the values through a subshell so the
 ## sourced variables do not leak into the rest of this script.
 ##
-OS_NAME="$(. "${OS_RELEASE}"; printf '%s' "${NAME}")"
-OS_BUILD="$(. "${OS_RELEASE}"; printf '%s' "${VERSION%% *}")"
-[ -n "${OS_BUILD}" ] || OS_BUILD="$(. "${OS_RELEASE}"; printf '%s' "${VERSION_ID}")"
+## Every value is defaulted before use. This script runs under "set -u", so a
+## base that does not set one of these would otherwise abort here with
+## "VERSION: unbound variable" - and the VERSION_ID fallback on the next line,
+## which exists for exactly that base, would never be reached.
+OS_NAME="$(. "${OS_RELEASE}"; printf '%s' "${NAME:-}")"
+OS_BUILD="$(. "${OS_RELEASE}"; printf '%s' "${VERSION:-}")"
+OS_BUILD="${OS_BUILD%% *}"
+[ -n "${OS_BUILD}" ] || OS_BUILD="$(. "${OS_RELEASE}"; printf '%s' "${VERSION_ID:-}")"
 ##
 os_release_set VARIANT           "\"MYIMAGE Atomic\""
 os_release_set VARIANT_ID        "myimage-atomic"

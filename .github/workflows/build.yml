@@ -37,8 +37,15 @@ on:
 
 env:
   # The published image name: ghcr.io/<owner>/<IMAGE_NAME>
-  # Change it with ./scripts/set-image-name.sh, or set it to
-  # ${{ github.event.repository.name }} to always follow the repository name.
+  #
+  # Change it with ./scripts/set-image-name.sh, which rewrites the name
+  # everywhere else it appears too - the signature policy scope, the ISO
+  # kickstart, the registries.d entry, os-release. A literal here is the point:
+  # replacing it with an expression such as the repository name would leave
+  # this the only place that follows, while every other reference stayed put,
+  # and "set-image-name.sh --check" - which both workflows run before they
+  # build - would read the expression itself as the current name and fail on
+  # every run.
   IMAGE_NAME: "myimage"
   IMAGE_DESC: "My personal bootable container image"
   # Lowercased in the build step - ghcr.io rejects uppercase names.
@@ -372,9 +379,11 @@ jobs:
   # page fills up with a version per day and several GB each. This keeps the
   # most recent ones and deletes the rest.
   #
-  # "latest" always rides the newest version, so a count-based rule can never
-  # take it away; ignore-versions guards it anyway, and a run that would match
-  # nothing simply deletes nothing.
+  # "latest" always rides the newest version, so keeping the newest N can never
+  # take it away - that, not the ignore-versions line, is what protects it.
+  # ignore-versions matches a package version's NAME, which for a container is
+  # its sha256 digest rather than any of its tags, so '^latest$' matches
+  # nothing; it is kept as a harmless second pair of braces, not relied on.
   #
   # To keep everything instead, delete this job. To keep more or less history,
   # change min-versions-to-keep.

@@ -90,12 +90,20 @@ jobs:
           # Provided automatically by GitHub; no secret to create. The job's
           # "packages: read" permission above is what makes it usable here.
           REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # The dispatch input reaches the script as an environment variable
+          # rather than being interpolated into the shell below. GitHub expands
+          # ${{ }} into the script text before bash ever sees it, so an input
+          # containing shell syntax would be executed by this step - which runs
+          # sudo and holds a registry token. Whoever can dispatch this workflow
+          # can already push to the repository, so this is not a hole so much
+          # as one less thing standing open.
+          IMAGE_TAG: ${{ inputs.tag }}
         run: |
           set -euo pipefail
 
           IMAGE_NAME="${IMAGE_NAME,,}"
           IMAGE_REGISTRY="${IMAGE_REGISTRY,,}"
-          IMAGE_REF="${IMAGE_REGISTRY}/${IMAGE_NAME}:${{ inputs.tag }}"
+          IMAGE_REF="${IMAGE_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}"
 
           # Same date format as the image tags in build.yml, taken once here so
           # the upload step cannot pick a different day if the build runs over
