@@ -219,7 +219,11 @@ echo "${DONKEY_SHA256}  /etc/skel/.config/emacs/donkey/donkey.el" | sha256sum -c
 ##
 ## build_files/rpm_packages is a plain list, one package per line.
 ## Blank lines and lines starting with # are ignored.
-PACKAGES=$(grep -vE '^\s*(#|$)' "${CTX}/rpm_packages" | tr '\n' ' ')
+## grep exits 1 when it matches nothing, and under "set -e" with pipefail that
+## aborts the build here - silently, with no message, and before the emptiness
+## check below can say anything. Commenting out every line is a legitimate way
+## to build a bare image, so it has to reach that check.
+PACKAGES=$({ grep -vE '^\s*(#|$)' "${CTX}/rpm_packages" || true; } | tr '\n' ' ')
 
 ## --skip-unavailable keeps the build going when a package is missing from the
 ## repos. That is deliberate and worth keeping: a new release renames, merges

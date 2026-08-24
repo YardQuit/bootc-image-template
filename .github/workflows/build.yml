@@ -238,16 +238,30 @@ jobs:
           # Tee the build so the lint warnings can be lifted out of it below.
           # They are printed by "bootc container lint" in the Containerfile and
           # would otherwise be five lines somewhere in a few thousand.
+          #
+          # RUNNER_TEMP rather than /tmp: a hosted runner gets a fresh machine
+          # per job, but a self-hosted one does not, and two jobs sharing /tmp
+          # would read each other's build log - or follow a symlink planted
+          # where the file was expected.
           podman build --file ./Containerfile --format docker \
             --build-arg "IMAGE_REPO=${IMAGE_REGISTRY}/${IMAGE_NAME}" \
-            "${ARGS[@]}" . 2>&1 | tee /tmp/build.log
+            "${ARGS[@]}" . 2>&1 | tee "${RUNNER_TEMP}/build.log"
 
           # Lint warnings do not fail the build - see the Containerfile for why -
           # so put them where they will actually be read. They describe a system
           # that boots and then misbehaves, most often a directory in /var that
           # no tmpfiles.d rule recreates and which is therefore empty on every
           # machine that installs the image.
-          WARNINGS="$(sed -n '/^Lint warning:/,/^$/p' /tmp/build.log || true)"
+          # Bounded at the lint summary line rather than at the next blank
+          # line. A blank line is not guaranteed to follow the last warning,
+          # and when it does not, a range ending at /^$/ never closes and the
+          # entire rest of the build log lands in the summary. No summary line
+          # means lint did not finish, and there is nothing to report.
+          WARNINGS=""
+          if grep -q '^Checks passed:' "${RUNNER_TEMP}/build.log"; then
+            WARNINGS="$(awk '/^Checks passed:/ {exit} /^Lint warning:/ {p=1} p' \
+                        "${RUNNER_TEMP}/build.log")"
+          fi
           if [ -n "${WARNINGS}" ]; then
             {
               echo "### Image lint warnings"

@@ -4,9 +4,14 @@
 # the installation and points the installed system at your published image, so
 # future "bootc upgrade" runs pull from there.
 
+# --erroronfail matters more than it looks. Anaconda ignores a failing %post by
+# default: the install would finish, report success, and hand you a machine
+# whose bootc origin still points at the base image - so every "bootc upgrade"
+# from then on tracks the base rather than your image, and nothing ever says
+# so. With the flag, a failed switch stops the install where you can see it.
 [customizations.installer.kickstart]
 contents = """
-%post
+%post --erroronfail
 bootc switch --mutate-in-place --transport registry ghcr.io/myorg/myimage:latest
 %end
 """

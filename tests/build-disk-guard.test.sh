@@ -66,10 +66,17 @@ tree() {
 # match look like no match at all. Every case would report "no" - including the
 # ones that expect it, which would then pass for the wrong reason.
 guard_fired() {  # $1 tree, $2 disk type
-    local out
-    out="$( cd "$1" && ./scripts/build-disk.sh --check "$2" 2>&1 )"
+    local out rc=0
+    out="$( cd "$1" && ./scripts/build-disk.sh --check "$2" 2>&1 )" || rc=$?
+
     if grep -q "placeholder password" <<<"${out}"; then
         printf 'yes'
+    elif [ "${rc}" -ne 0 ]; then
+        # Neither outcome: the script failed for some other reason. Reporting
+        # that as "no" would let every case that expects the guard to stay
+        # quiet pass against a script that never reached the guard at all -
+        # a broken build-disk.sh would take this whole suite green with it.
+        printf 'died(exit %s)' "${rc}"
     else
         printf 'no'
     fi
