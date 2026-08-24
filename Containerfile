@@ -41,13 +41,22 @@ RUN --mount=type=bind,from=ctx,source=/,target=/ctx \
 
 ## Sanity check: fails the build if the image is not a valid bootable container.
 ##
-## --fatal-warnings makes lint's warnings fail too, not just its errors. Those
-## warnings are the ones that describe a system that boots but misbehaves - a
-## directory written to /var that no tmpfiles.d rule recreates, say, which is
-## silently empty on every machine that installs the image. They are easy to
-## miss in a build log and expensive to find later.
+## lint's fatal checks fail the build here; its warnings do not. That split is
+## deliberate, and it was briefly the other way round.
 ##
-## Drop the flag if a warning ever blocks you and you have decided it is not
-## worth fixing; "bootc container lint --list" names every check, and --skip
-## turns off one by name, which is better than turning them all off.
-RUN bootc container lint --fatal-warnings
+## The warnings are worth reading - they describe a system that boots and then
+## misbehaves, most often a directory written to /var that no tmpfiles.d rule
+## recreates, so it is silently empty on every machine that installs the image.
+## But they fire on ordinary packages, not on mistakes: add cups and postgresql
+## to rpm_packages and you get /run/cups and /var/lib/pgsql, which is simply
+## what those packages are. With --fatal-warnings that is a failed build for
+## doing the one thing this template exists to let you do.
+##
+## So they are reported rather than enforced: the workflow lifts them onto the
+## run summary next to the skipped-package list, where they are hard to miss
+## and cost nothing when you decide a given one does not matter.
+##
+## To enforce them anyway, add --fatal-warnings below - and expect to pair it
+## with "--skip <name>" as your package list grows. "bootc container lint
+## --list" names every check and says which are fatal and which warn.
+RUN bootc container lint

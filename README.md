@@ -187,12 +187,19 @@ Two things are worth knowing when you write build steps:
   systemd-tmpfiles recreates it on every boot. `bootc container lint` names any
   directory that still needs one, and the build is warning-free as it stands -
   so a new warning means a package you added brought a directory with it.
-- The build ends on `bootc container lint --fatal-warnings`, so it fails if the
-  image is not a valid bootable container *or* if lint warns. Warnings there
-  describe a system that boots and then misbehaves - the `/var` case above is
-  one - and they are easy to lose in a build log. `bootc container lint --list`
-  names every check, and `--skip <name>` turns off one of them, which is better
-  than dropping `--fatal-warnings` altogether.
+- The build ends on `bootc container lint`, which fails if the image is not a
+  valid bootable container. Its *warnings* do not fail the build - they are
+  lifted onto the CI run summary instead, beside the skipped-package list.
+
+  That split is deliberate, and it was briefly the other way round. Warnings
+  describe a system that boots and then misbehaves (the `/var` case above is
+  one), so they are worth reading - but they fire on ordinary packages rather
+  than on mistakes. Add `cups` and `postgresql-server` and you get `/run/cups`
+  and `/var/lib/pgsql`, which is simply what those packages are; with
+  `--fatal-warnings` that is a failed build for doing the one thing this
+  template exists to let you do. Add the flag in the `Containerfile` if you
+  want them enforced, and expect to pair it with `--skip <name>` as your
+  package list grows; `bootc container lint --list` names every check.
 
 ## Packages that install into /opt
 
