@@ -123,7 +123,9 @@ Commented examples, off by default, cover packages that install into `/opt`
 5. Commit and push to your default branch. The build workflow triggers on
    `main` and `master` and publishes `ghcr.io/myorg/mydesktop:latest` from
    whichever is your repository's default; if yours is named something else,
-   add it to the two branch lists in `.github/workflows/build.yml`.
+   add it to the two branch lists in `.github/workflows/build.yml`. The ISO
+   workflow is manual, and `checks.yml` runs on every branch, so neither needs
+   that edit.
 6. On the machine you want to run it:
 
    ```bash
@@ -613,8 +615,15 @@ quietly cannot update.
 Others can then verify an image with:
 
 ```bash
-cosign verify --key build_files/cosign.pub ghcr.io/myorg/myimage:latest
+cosign verify --key build_files/cosign.pub \
+  --insecure-ignore-tlog=true ghcr.io/myorg/myimage:latest
 ```
+
+`--insecure-ignore-tlog=true` is required, not optional. The signing step
+passes `--tlog-upload=false`, so these signatures are deliberately not in the
+public Rekor transparency log, and without the flag `cosign verify` refuses
+them for being absent from a log they were never sent to. Drop both flags
+together if you want the public record.
 
 If you would rather not sign at all, see "Building without signatures" below.
 

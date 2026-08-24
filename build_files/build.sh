@@ -252,8 +252,16 @@ PACKAGES=$({ grep -vE '^\s*(#|$)' "${CTX}/rpm_packages" || true; } | tr '\n' ' '
 ## "rpm -q --whatprovides" is what decides, rather than the package name alone,
 ## so a name satisfied by a virtual provide or by a renamed package still
 ## counts as installed.
+## dnf5 on Fedora, dnf on CentOS Stream, which ships dnf 4 and no dnf5 at all.
+## The flag differs too - dnf 4 has no --skip-unavailable, and its equivalent is
+## strict=0 - so swapping the binary alone is not enough. Without this the very
+## first package install dies on a base the Containerfile offers by name.
 if [ -n "${PACKAGES}" ]; then
-    dnf5 install --skip-unavailable -y ${PACKAGES}
+    if command -v dnf5 >/dev/null 2>&1; then
+        dnf5 install --skip-unavailable -y ${PACKAGES}
+    else
+        dnf install --setopt=strict=0 -y ${PACKAGES}
+    fi
 fi
 
 install -d -m 0755 /usr/share/image-build
@@ -311,7 +319,11 @@ rm -f /etc/skel/.emacs
 ### 7. Clean up #############################################################
 ##
 ## Keeps the image small; the metadata is rebuilt on the running system anyway.
-dnf5 -y clean all
+if command -v dnf5 >/dev/null 2>&1; then
+    dnf5 -y clean all
+else
+    dnf -y clean all
+fi
 
 ## dnf also leaves repo metadata and lock files behind in /var and /run. Both are
 ## runtime state rather than image content, and "bootc container lint" flags them

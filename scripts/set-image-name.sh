@@ -495,9 +495,18 @@ rewrite_file() {  # $1 file, $2 old image name (""=skip), $3 old owner (""=skip)
 
         # The uppercase rendering appears in the ISO filename and in the
         # comments that quote it, in any file - so this pass runs everywhere.
-        sed -i -e "${DONKEY_GUARD}b" \
-               -e "${LITERAL_GUARD}b" \
-               -e "s#\b${upper_re}\b#${NAME_UPPER}#g" "${file}"
+        #
+        # Unless the name has no letters to change case. "2024" uppercases to
+        # itself, so this pass would match every ordinary lowercase reference
+        # and rewrite the lot to the UPPERCASE form of the new name, before the
+        # lowercase pass below ever saw them - leaving ghcr.io/owner/VAULTED
+        # everywhere, which registries reject. The three passes only make sense
+        # when the three renderings are actually distinct.
+        if [ "${old_name^^}" != "${old_name}" ]; then
+            sed -i -e "${DONKEY_GUARD}b" \
+                   -e "${LITERAL_GUARD}b" \
+                   -e "s#\b${upper_re}\b#${NAME_UPPER}#g" "${file}"
+        fi
 
         if [ "${file}" = "README.md" ]; then
             # The README carries all three renderings at once: the ISO filename

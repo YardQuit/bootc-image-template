@@ -144,6 +144,21 @@ check "the second rename lands"           "$?" "0"
 
 
 echo
+echo "A name with no letters"
+# "2024" uppercases to itself, so the uppercase pass would match every ordinary
+# lowercase reference and rewrite the lot to the UPPERCASE form of the next
+# name - ghcr.io/owner/VAULTED, which registries reject.
+T="$(tree digits)"
+check "renaming to a digits-only name"    "$(run "${T}" 2024 acmelabs)"      "0"
+check "and away from it again"            "$(run "${T}" vaulted acmelabs)"   "0"
+grep -q 'IMAGE_NAME: "vaulted"' "${T}/.github/workflows/build.yml"
+check "the result stays lowercase"        "$?" "0"
+grep -q 'ghcr\.io/acmelabs/vaulted' "${T}/disk_config/iso.toml"
+check "so does the kickstart"             "$?" "0"
+check "--check is clean afterwards"       "$(run "${T}" --check)"            "0"
+
+
+echo
 echo "Renaming without an owner"
 T="$(tree nameonly)"
 # Read the owner rather than assume "myorg": these tests ship inside the

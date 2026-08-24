@@ -19,6 +19,11 @@ COPY build_files /
 ##   quay.io/fedora-ostree-desktops/kinoite:44         # Fedora KDE
 ##   quay.io/fedora/fedora-bootc:44                    # Fedora, no desktop
 ##   quay.io/centos-bootc/centos-bootc:stream10        # CentOS Stream
+##
+## The CentOS option builds, but its repositories carry a different package set
+## from Fedora's: of the 27 names in rpm_packages, 16 do not exist there. The
+## build does not fail on that - it records them, see section 3 of build.sh -
+## but expect to reconcile the list rather than inherit it.
 FROM quay.io/fedora-ostree-desktops/silverblue:44
 
 ## The repository this image gets published to, passed in by the workflow.

@@ -9,18 +9,16 @@
 # change what the rename script sees.
 name: Checks
 
+# Every branch, deliberately. build.yml has to name its branches, because it
+# publishes and must not do that from just anywhere - and its comment tells you
+# to add yours to those lists. This one publishes nothing, so a branch filter
+# here buys no safety and costs the whole point of the workflow: a repository
+# whose default branch is neither main nor master would get no checks at all,
+# silently, and nothing anywhere would say so. Running everywhere also means
+# feature branches are checked before the pull request exists.
 on:
   push:
-    # Both common default-branch names, for the reason build.yml explains: a
-    # repository created from this template inherits its creator's default
-    # branch name, and a branch missing here fails silently.
-    branches:
-      - main
-      - master
   pull_request:
-    branches:
-      - main
-      - master
   workflow_dispatch:
 
 concurrency:
