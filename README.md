@@ -405,6 +405,15 @@ script fails quietly when it fails at all.
 Go to *Actions -> Build ISO -> Run workflow*. It builds from the image already
 published to `ghcr.io`, so run the container build first.
 
+The *tag* input picks which published image goes onto the ISO. It does not
+decide what the installed machine follows afterwards - the kickstart in
+`disk_config/iso.toml` points that at `:latest`, and it runs after the switch
+bootc-image-builder writes for the tag being built, so it wins. An ISO built
+from `v2` therefore installs `v2` and then tracks `:latest`. That is also what
+makes a locally built ISO usable: `scripts/build-disk.sh` hands the builder
+`localhost/<name>:<tag>`, which the installed machine could never reach.
+Pin the tag in `iso.toml` if you would rather hold machines on a release.
+
 The ISO is named after what is inside the image rather than after anything
 hardcoded, so changing the base in the `Containerfile` renames it by itself:
 

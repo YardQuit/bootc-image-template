@@ -16,8 +16,14 @@ name: Build ISO
 on:
   workflow_dispatch:
     inputs:
+      # Which published image the ISO is built from. It does not change what
+      # the installed machine follows afterwards: the kickstart in
+      # disk_config/iso.toml points that at :latest, deliberately, and runs
+      # after the switch bootc-image-builder writes for this tag. So an ISO
+      # built from v2 carries v2 and installs a machine that upgrades to
+      # whatever :latest becomes.
       tag:
-        description: "Image tag to build from"
+        description: "Image tag to build the ISO from (machines still track :latest)"
         required: false
         default: "latest"
         type: string

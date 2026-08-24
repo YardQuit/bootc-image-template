@@ -9,6 +9,12 @@
 #   ./scripts/build-disk.sh iso myimage v2     # a specific image and tag
 #   ./scripts/build-disk.sh --check qcow2      # check the config, build nothing
 #
+# The tag picks which local image goes onto the ISO. What the installed machine
+# upgrades from afterwards is set by the kickstart in disk_config/iso.toml, and
+# that names the published image at :latest whatever is built here - which is
+# the only reason an ISO built from localhost/... installs a machine that can
+# upgrade at all.
+#
 # --check stops after the checks below - the config file it would use, and the
 # placeholder-password refusal - and reports what it found. Useful for asking
 # "would this build?" without waiting for one, and it is what the tests use:
