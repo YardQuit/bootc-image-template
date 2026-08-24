@@ -165,8 +165,20 @@ not arrive:
 | `/usr/share/image-build/skipped-packages` | in the image, readable on the machine |
 | `/usr/share/image-build/rpm_packages` | what that image asked for, to compare against |
 
-An empty `skipped-packages` means everything on the list is installed. After a
-base-image bump, that file is the to-do list.
+Both files are always present, so an empty `skipped-packages` means everything
+on the list is installed. After a base-image bump, that file is the to-do list.
+
+They ship *inside the image*, so the machine can answer the question long after
+the build log has expired:
+
+```bash
+cat /usr/share/image-build/skipped-packages       # what did not arrive
+grep -x helix /usr/share/image-build/rpm_packages # was it even asked for?
+```
+
+Between them those two answer the question you actually have when a tool is
+missing on a running machine: did I forget to add it, or did the repos stop
+providing it? Neither is visible from the machine otherwise.
 
 **Files** - drop them under `build_files/sysfiles/` using the path they should
 have in the image. For example `build_files/sysfiles/etc/motd.d/10-welcome`
