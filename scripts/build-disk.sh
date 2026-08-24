@@ -7,9 +7,22 @@
 #   ./scripts/build-disk.sh                    # ISO from localhost/myimage:latest
 #   ./scripts/build-disk.sh qcow2              # VM disk instead
 #   ./scripts/build-disk.sh iso myimage v2     # a specific image and tag
+#   ./scripts/build-disk.sh --check qcow2      # check the config, build nothing
+#
+# --check stops after the checks below - the config file it would use, and the
+# placeholder-password refusal - and reports what it found. Useful for asking
+# "would this build?" without waiting for one, and it is what the tests use:
+# they exercise the refusal, and running the real thing would launch a
+# privileged builder on every case that is meant to pass.
 #
 # Results land in ./output/
 set -euo pipefail
+
+CHECK_ONLY=0
+if [ "${1:-}" = "--check" ]; then
+    CHECK_ONLY=1
+    shift
+fi
 
 DISK_TYPE="${1:-iso}"     # iso | qcow2 | raw
 IMAGE_NAME="${2:-myimage}"
@@ -49,9 +62,31 @@ if [ "${CONFIG}" = "disk_config/disk.toml" ] \
     exit 1
 fi
 
+if [ "${CHECK_ONLY}" -eq 1 ]; then
+    echo "Checks passed. A ${DISK_TYPE} build would use ${CONFIG} and ${IMAGE}."
+    exit 0
+fi
+
 # The builder reads from root's container storage, but "podman build" without
-# sudo writes to yours. Copy the image over if it isn't there yet.
-if ! sudo podman image exists "${IMAGE}"; then
+# sudo writes to yours, so the image has to be copied across.
+#
+# Compare the two by image ID rather than asking whether the name exists.
+# "podman image exists" matches on name:tag, so once the first copy has landed
+# it answers yes forever - and every later run would then build the disk from
+# whatever image was current when you first ran this, however many times you
+# rebuild the container in between. Nothing says so; the disk is simply stale.
+LOCAL_ID="$(podman image inspect "${IMAGE}" --format '{{.Id}}' 2>/dev/null || true)"
+ROOT_ID="$(sudo podman image inspect "${IMAGE}" --format '{{.Id}}' 2>/dev/null || true)"
+
+if [ -z "${LOCAL_ID}" ]; then
+    echo "Error: ${IMAGE} does not exist." >&2
+    echo >&2
+    echo "Build it first:" >&2
+    echo "  ./scripts/build.sh ${IMAGE_NAME} ${TAG}" >&2
+    exit 1
+fi
+
+if [ "${LOCAL_ID}" != "${ROOT_ID}" ]; then
     echo "Copying ${IMAGE} into root's container storage ..."
     podman image save "${IMAGE}" | sudo podman image load
 fi

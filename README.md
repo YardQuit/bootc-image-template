@@ -280,6 +280,10 @@ CI derives from them is unaffected.
 A local container build is a good way to test package names quickly; you do not
 need to push to test whether the image builds.
 
+`./scripts/build-disk.sh --check qcow2` runs the checks a real build would -
+which config file it would read, and the placeholder-password refusal below -
+and stops there, so you can ask "would this build?" without waiting for one.
+
 `build-disk.sh qcow2` and `raw` read `disk_config/disk.toml`, which defines the
 account you log in with. It ships with the placeholder password `changeme` on a
 user in `wheel`, and the script refuses to build while it says that - a disk

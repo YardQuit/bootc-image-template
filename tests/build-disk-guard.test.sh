@@ -18,8 +18,9 @@
 # refused every disk build forever, and the only way out was deleting the
 # documentation. Both halves are tested here.
 #
-# Nothing here builds anything: each case runs build-disk.sh only far enough to
-# see whether the guard fired.
+# Nothing here builds anything: every case runs build-disk.sh with --check, so
+# it stops after the guard. That is not a detail - without it, the cases that
+# expect the guard to stay quiet run the builder for real.
 #
 # set -e is deliberately absent: most of these run a command meant to fail.
 set -uo pipefail
@@ -49,8 +50,15 @@ tree() {
     printf '%s' "${dst}"
 }
 
-# Did the guard fire? Only the guard - build-disk.sh goes on to call podman,
-# which is allowed to fail here and says nothing about what is being tested.
+# Did the guard fire?
+#
+# --check, so that build-disk.sh stops after the guard instead of going on to
+# build. Without it the cases that expect the guard NOT to fire each run a real
+# "sudo podman run --privileged" builder to completion - four qcow2 builds and
+# an ISO - on any machine that happens to have localhost/<name>:latest, which
+# is to say right after ./scripts/build.sh. That is exactly what this file
+# looked like before, and it seemed harmless only because the image was absent
+# and podman failed first.
 #
 # The output is captured before it is searched, not piped into grep: "grep -q"
 # exits at the first match and closes the pipe, build-disk.sh then dies of
@@ -59,7 +67,7 @@ tree() {
 # ones that expect it, which would then pass for the wrong reason.
 guard_fired() {  # $1 tree, $2 disk type
     local out
-    out="$( cd "$1" && ./scripts/build-disk.sh "$2" 2>&1 )"
+    out="$( cd "$1" && ./scripts/build-disk.sh --check "$2" 2>&1 )"
     if grep -q "placeholder password" <<<"${out}"; then
         printf 'yes'
     else
