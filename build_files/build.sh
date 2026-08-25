@@ -3,7 +3,8 @@
 ## build.sh - everything that turns the base image into your image.
 ## It runs inside the container during "podman build", as root.
 ##
-##   -e  stop on the first error          -u  error on undefined variables
+##   -e  stop on the first error
+##   -u  error on undefined variables
 ##   -x  print each command (useful in CI logs)
 ##   -o pipefail  a failing command in a pipe fails the whole pipe
 ##
