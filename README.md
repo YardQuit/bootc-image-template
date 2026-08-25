@@ -213,6 +213,14 @@ rides the newest, so it can never be pruned away. Change
 
 ## Customising the image
 
+**Optional features in `build.sh`** - the file is one commented script, and
+anything you can switch on is switched on the same way: uncomment every line
+between a pair of `# ----` rulers. Everything that feature needs is inside
+them, including steps that belong to another section - the 1Password block
+carries section 2's `/opt` fix rather than sending you back for it - so there
+is never a second place to remember. A lone commented command has no rulers,
+because a single line cannot be half-enabled.
+
 **Packages** - add them to `build_files/rpm_packages`, one per line. It is one
 flat alphabetical list rather than grouped sections, so a name is easy to find
 and easy to slot in. Check a name first with `dnf info <package>`.
@@ -400,6 +408,7 @@ shellcheck --severity=warning --exclude=SC1090 \
 | `tests/set-image-name.test.sh` | The rename script's guards. |
 | `tests/build-disk-guard.test.sh` | The `disk.toml` placeholder-password guard. |
 | `tests/readme-toc.test.sh` | That this README's table of contents still matches its headings. |
+| `tests/build-sh-blocks.test.sh` | That every `# ----` block in `build.sh` closes, is wholly commented, and still parses once uncommented. |
 
 `.github/workflows/checks.yml` runs all of them on every push and pull request,
 along with a parse of every YAML and TOML file in the repository. It needs no
@@ -431,6 +440,14 @@ The rename script gets tests because of how it fails: it rewrites every image
 reference with whole-word text substitution, and when a guard is wrong it does
 not crash - it writes a plausible-looking file, the build stays green, and the
 first symptom is a machine that cannot upgrade.
+
+The `# ----` blocks get a suite because they make a promise: uncomment every
+line from one ruler to the other and the feature is on, with nothing to find
+elsewhere in the file. Breaking that is easy and quiet - add a command outside
+the rulers, leave one inside them already live, drop a closing ruler - and
+nobody finds out until someone enables the feature and gets a build that fails,
+or one that succeeds while silently missing a step. So the test uncomments each
+block exactly as the file says to and hands the result to `bash -n`.
 
 The `disk.toml` guard gets them for the mirror-image reason. Refusing the
 placeholder is the half that is obvious to test; letting a correctly configured

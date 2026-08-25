@@ -10,9 +10,15 @@
 ## Comment style, here and in the Containerfile: "##" is commentary, meant
 ## to be read. A single "#" marks a real command that is commented out -
 ## uncomment it to enable that feature.
+##
+## Where enabling something takes more than one command, those commands sit
+## together between two "# ----" rulers. Uncomment every line from one ruler to
+## the other and the feature is on; there is nothing to find elsewhere in the
+## file. A single commented command needs no rulers.
 set -euxo pipefail
 
 CTX="/ctx"   # where the Containerfile mounted build_files/
+
 
 ### 1. Copy files into the image ############################################
 ##
@@ -25,6 +31,7 @@ fi
 ## Make sure anything you dropped in these dirs is executable.
 ## Delete these lines if you don't ship scripts.
 chmod -R +x /etc/cron.daily 2>/dev/null || true
+
 
 ### 1a. Donkey - modal editing for Emacs ####################################
 ##
@@ -71,6 +78,7 @@ curl -fL --retry 3 --retry-all-errors --connect-timeout 15 \
 chmod 0644 /etc/skel/.config/emacs/donkey/donkey.el
 echo "${DONKEY_SHA256}  /etc/skel/.config/emacs/donkey/donkey.el" | sha256sum -c -
 
+
 ### 2. Packages that install into /opt ######################################
 ##
 ## Skip this unless you install something that lives in /opt - Chrome, various
@@ -85,20 +93,28 @@ echo "${DONKEY_SHA256}  /etc/skel/.config/emacs/donkey/donkey.el" | sha256sum -c
 ## Making /opt a real directory before installing anything puts that content
 ## inside the image, where "bootc upgrade" manages it like everything else.
 ## The trade-off: /opt is then read-only on the running system, so you can no
-## longer drop files into /opt by hand. Uncomment to enable:
+## longer drop files into /opt by hand.
+##
+## The 1Password and MEGAsync blocks below carry their own copy of these four
+## lines, so enabling one of those needs nothing from here. Uncomment it here
+## when you install some other package that lives in /opt.
 
+# --- /opt as a real directory: uncomment to the next ruler ------------------
 # if [ -L /opt ]; then
 #     rm /opt
 #     mkdir /opt
 # fi
+# --------------------------------------------------------------------------
 
 ## Some applications insist on writing inside their own directory. Move those
 ## directories to /var and leave a symlink behind - this is what the bootc
 ## documentation recommends:
 
+# --- an /opt package that writes inside its own directory -------------------
 # dnf5 -y install examplepkg
 # mv /opt/examplepkg/logs /var/log/examplepkg
 # ln -sr /var/log/examplepkg /opt/examplepkg/logs
+# --------------------------------------------------------------------------
 
 ## A directory under /var that has to exist on a fresh machine is best created
 ## at boot by systemd-tmpfiles instead of here. Add the file
@@ -110,9 +126,12 @@ echo "${DONKEY_SHA256}  /etc/skel/.config/emacs/donkey/donkey.el" | sha256sum -c
 ## symlink alone and install the application some other way on the running
 ## system (a container, a Flatpak, or a per-machine install).
 
+
 ### 2a. Example of such a package: 1Password (Fedora) #######################
 ##
-## Ready to use - uncomment the three commands below.
+## Ready to use: uncomment every line between the rulers below, and nothing
+## else in this file has to change. The optional extra further down has rulers
+## of its own.
 ##
 ## The "-latest" URL always serves the current release, so each image build
 ## picks up whatever version is newest at that moment. Nothing is pinned; if you
@@ -120,8 +139,8 @@ echo "${DONKEY_SHA256}  /etc/skel/.config/emacs/donkey/donkey.el" | sha256sum -c
 ## instead, e.g. .../x86_64/1password-8.12.32.x86_64.rpm
 ##
 ## 1Password puts almost all of its files in /opt, which makes it the textbook
-## case for the block above: uncomment that too, or the app will be missing on
-## any machine that switches to your image.
+## case for section 2 - so the block below opens with those same four lines,
+## rather than sending you back there to remember them.
 ##
 ## The package's install scriptlet creates the "onepassword" and
 ## "onepassword-mcp" groups if they are missing. A container build has no users,
@@ -148,15 +167,26 @@ echo "${DONKEY_SHA256}  /etc/skel/.config/emacs/donkey/donkey.el" | sha256sum -c
 ## Both halves, not one or the other: the RPM below wants the groups to exist
 ## before it installs, and a sysusers.d file is not read until boot.
 
+# --- 1Password: uncomment every line down to the next ruler -----------------
+# ## /opt has to be a real directory before anything installs into it. The same
+# ## four lines as section 2, and harmless if that block is enabled as well.
+# if [ -L /opt ]; then
+#     rm /opt
+#     mkdir /opt
+# fi
+#
+# ## System groups, so the package reuses them instead of allocating from the
+# ## human range. Worth pairing with the sysusers.d file described above.
 # groupadd -r onepassword
 # groupadd -r onepassword-mcp
-
+#
 # rpm --import https://downloads.1password.com/linux/keys/1password.asc
 # dnf5 -y install https://downloads.1password.com/linux/rpm/stable/x86_64/1password-latest.rpm
-
+#
 # ## The package drops in a dnf repository for its own auto-updates. An image
 # ## updates when you rebuild it, so the file has no purpose here.
 # rm -f /etc/yum.repos.d/1password.repo
+# --------------------------------------------------------------------------
 
 ## Two things the package's install step does that are worth knowing about:
 ##
@@ -179,27 +209,32 @@ echo "${DONKEY_SHA256}  /etc/skel/.config/emacs/donkey/donkey.el" | sha256sum -c
 ##    Leave the command commented out if you have not created that file: the
 ##    build stops on a missing source.
 
+# --- 1Password, optional: the polkit policy from your own file --------------
 # install -Dm0644 \
 #     /ctx/sysfiles/usr/share/polkit-1/actions/com.1password.1Password.policy \
 #     /usr/share/polkit-1/actions/com.1password.1Password.policy
+# --------------------------------------------------------------------------
 
 ##  * It creates the "onepassword" and "onepassword-mcp" groups, sets the setgid
 ##    bit on two helper binaries and the setuid bit on chrome-sandbox. That all
 ##    happens during the build and travels in the image, which is what you want.
 
+
 ### 2b. Example of such a package: MEGAsync (Fedora) ########################
 ##
-## Ready to use - uncomment the two commands below.
+## Ready to use: uncomment every line between the rulers below, and nothing
+## else in this file has to change. The command-line client further down has
+## rulers of its own.
 ##
 ## Same idea as 1Password, with one wrinkle: the download URL names the Fedora
 ## release, so it has to be kept in step with the FROM line in the Containerfile.
 ## There is no build for a Fedora release until MEGA publishes one, and the
 ## build fails loudly if you point at one that does not exist yet.
 ##
-## MEGAsync puts its bundled ffmpeg libraries in /opt/megasync/lib, so the block
-## in section 2 has to be uncommented as well. Without it the application is
-## installed but its libraries disappear on the first upgrade, which looks like
-## a broken app rather than a missing one.
+## MEGAsync puts its bundled ffmpeg libraries in /opt/megasync/lib, so it needs
+## section 2's /opt fix - the block below opens with it. Without that, the
+## application installs but its libraries disappear on the first upgrade, which
+## looks like a broken app rather than a missing one.
 ##
 ## MEGAsync's %post scriptlet cannot succeed inside an image build, and neither
 ## of the two things it does is wanted here. It moves /var/lib/rpm/.rpm.lock
@@ -214,25 +249,37 @@ echo "${DONKEY_SHA256}  /etc/skel/.config/emacs/donkey/donkey.el" | sha256sum -c
 ## - a genuine download or dependency failure still stops the build. The same
 ## shape works for any vendor RPM with a scriptlet that misbehaves in a container.
 
+# --- MEGAsync: uncomment every line down to the next ruler ------------------
+# ## /opt has to be a real directory before anything installs into it. The same
+# ## four lines as section 2, and harmless if that block is enabled as well.
+# if [ -L /opt ]; then
+#     rm /opt
+#     mkdir /opt
+# fi
+#
 # dnf5 -y install https://mega.nz/linux/repo/Fedora_44/x86_64/megasync-Fedora_44.x86_64.rpm \
 #     || echo "megasync: dnf5 exited non-zero (expected) - verifying"
 # rpm -q megasync
+#
+# ## As with 1Password: a dnf repository for auto-updates, of no use in an image.
+# rm -f /etc/yum.repos.d/megasync.repo
+# --------------------------------------------------------------------------
 
 ## The inotify limit belongs in a sysctl.d drop-in applied at boot instead, e.g.
 ## build_files/sysfiles/usr/lib/sysctl.d/90-megasync-inotify.conf containing:
 ##
 ##   fs.inotify.max_user_watches = 524288
 
-# ## As with 1Password: a dnf repository for auto-updates, of no use in an image.
-# rm -f /etc/yum.repos.d/megasync.repo
-
 ## The command line client is published the same way, if you prefer it:
 
+# --- MEGAcmd, the command line client, instead of or as well as the above ---
 # dnf5 -y install https://mega.nz/linux/repo/Fedora_44/x86_64/megacmd-Fedora_44.x86_64.rpm
+# --------------------------------------------------------------------------
 
 ## Note that MEGAsync is a Qt5 application. On a GNOME or COSMIC image the Qt5
 ## libraries are not installed, so expect dnf to pull in a sizeable dependency
 ## tree along with it.
+
 
 ### 3. Install packages #####################################################
 ##
@@ -369,19 +416,23 @@ rm -f /etc/skel/.emacs
 
 # dnf5 group install --skip-unavailable -y cosmic-desktop
 
+
 ### 4. Optional: packages from COPR repos ###################################
 ##
 ## Enable the repo, install, then disable it again so the finished image does
 ## not keep pulling from it at runtime.
 
+# --- starship from COPR: uncomment every line down to the next ruler --------
 # dnf5 -y copr enable atim/starship
 # dnf5 -y install starship
 # dnf5 -y copr disable atim/starship
+# --------------------------------------------------------------------------
+
 
 ### 5. Optional: RPMs from a URL ############################################
 
-# dnf5 can install straight from a URL - no need to download first, and no
-
+##
+## dnf5 can install straight from a URL - no need to download first, and no
 ## repository on the finished system.
 
 # dnf5 -y install https://example.com/downloads/some-package.x86_64.rpm
@@ -389,10 +440,14 @@ rm -f /etc/skel/.emacs
 ## Sections 2a and 2b are complete, ready-to-uncomment examples of this
 ## (1Password and MEGAsync).
 
+
 ### 6. Optional: third-party repos ##########################################
 
+# --- a third-party repo: uncomment every line down to the next ruler --------
 # dnf5 config-manager addrepo --from-repofile=https://example.com/example.repo
 # dnf5 -y install example-package
+# --------------------------------------------------------------------------
+
 
 ### 7. Clean up #############################################################
 ##
@@ -411,6 +466,7 @@ rm -f /etc/skel/.emacs
 ## /var/lib/dnf, lock files under /run - is removed by pkg_cleanup, which runs
 ## as part of every install rather than once here. See section 3 for why: this
 ## spot is no longer after the last dnf invocation.
+
 
 ### 8. Enable systemd units #################################################
 ##
@@ -519,10 +575,13 @@ systemctl mask systemd-remount-fs.service
 
 # systemctl enable sshd.service
 
+# --- Tailscale: uncomment every line down to the next ruler -----------------
 # pkg_install tailscale
 # systemctl enable tailscaled.service
+# --------------------------------------------------------------------------
 
 # systemctl --global enable some-user-unit.service   # for every user session
+
 
 ### 9. Optional: tweak configuration ########################################
 ##
@@ -538,6 +597,7 @@ systemctl mask systemd-remount-fs.service
 ## regular file. Resolve it first, then edit the real target, then check the
 ## result - for a firewall setting a silent no-op is the worst outcome.
 
+# --- firewalld default zone: uncomment every line to the next ruler ---------
 # FIREWALLD_CONF="$(readlink -f /etc/firewalld/firewalld.conf)"
 # cp "${FIREWALLD_CONF}" "${FIREWALLD_CONF}.bak"
 # if grep -q '^DefaultZone=' "${FIREWALLD_CONF}"; then
@@ -546,6 +606,7 @@ systemctl mask systemd-remount-fs.service
 #     echo 'DefaultZone=drop' >> "${FIREWALLD_CONF}"
 # fi
 # firewall-offline-cmd --get-default-zone | grep -qx drop
+# --------------------------------------------------------------------------
 
 ## Example: require a YubiKey for sudo (pam_yubico is in rpm_packages already).
 ##
@@ -557,12 +618,15 @@ systemctl mask systemd-remount-fs.service
 ## You must also enrol a key (ykpamcfg -2) before booting the image, or sudo will
 ## reject you; /etc/pam.d/sudo.bak is left behind for recovery.
 
+# --- YubiKey for sudo: uncomment every line down to the next ruler ----------
 # if ! find /usr/lib64/security /usr/lib/security -name pam_yubico.so -print -quit 2>/dev/null | grep -q .; then
 #     echo "ERROR: pam_yubico.so not found - refusing to edit /etc/pam.d/sudo." >&2
 #     exit 1
 # fi
 # cp /etc/pam.d/sudo /etc/pam.d/sudo.bak
 # sed -i '/PAM-1.0/a\auth       required     pam_yubico.so mode=challenge-response' /etc/pam.d/sudo
+# --------------------------------------------------------------------------
+
 
 ### 9a. Identify this image in /etc/os-release ##############################
 ##
@@ -662,6 +726,7 @@ sed -i '/^REDHAT_BUGZILLA_PRODUCT=/d
 ## NAME and the leading field of VERSION are left untouched, so the ISO name the
 ## workflow derives from them is unaffected.
 
+
 ### 9b. Graphical boot ######################################################
 ##
 ## A splash screen instead of a wall of kernel messages needs two things, and a
@@ -730,6 +795,7 @@ if ! grep -qx plymouth <<<"${INITRAMFS_MODULES}"; then
     echo "in /usr/share/image-build/skipped-packages." >&2
     exit 1
 fi
+
 
 ### 9c. Verify our own updates ##############################################
 ##
@@ -948,6 +1014,7 @@ if rules[0].get("keyPath") != key or not os.path.exists(key):
     sys.exit("policy key %s missing or not installed" % key)
 '
 
+
 ### 10. Directories that must exist at boot ##################################
 ##
 ## /var is reset on every deployment, so a directory created during the build
@@ -978,6 +1045,7 @@ if getent passwd geoclue >/dev/null 2>&1; then
     printf 'd /var/lib/geoclue 0755 geoclue geoclue - -\n' \
         > /usr/lib/tmpfiles.d/20-geoclue-var-dir.conf
 fi
+
 
 ### 11. Build residue #######################################################
 ##
