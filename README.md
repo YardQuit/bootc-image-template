@@ -26,6 +26,8 @@ generated files, nothing hidden.
   - [Removing the tests](#removing-the-tests)
 - [ISOs in CI](#isos-in-ci)
 - [Keeping machines up to date](#keeping-machines-up-to-date)
+- [What an image-based system buys you](#what-an-image-based-system-buys-you)
+- [Recovering from a bad change](#recovering-from-a-bad-change)
 - [Updating from the template](#updating-from-the-template)
 - [Emacs and Donkey](#emacs-and-donkey)
 - [Signing (required)](#signing-required)
@@ -536,6 +538,98 @@ Unlike a plain bootc base, this image does have a working `/etc/cron.daily` -
 `cronie-anacron`, `crontabs` and an enabled `crond` - so a daily script dropped
 in there runs. Use it for your own jobs; the image updates itself through bootc,
 not through cron.
+
+## What an image-based system buys you
+
+Worth being concrete about, because the trade is real in both directions.
+
+**The machine is a file you can read.** `Containerfile` plus
+`build_files/build.sh` *is* the operating system. There is no accumulated
+residue of eighteen months of `dnf install` at 2am - a machine installed today
+and one installed last year from the same tag are the same machine. When you
+want to know why something is configured the way it is, you read a diff.
+
+**`/usr` is read-only, so nothing drifts.** Not a policy, a mount option.
+Nothing running on the machine can quietly alter the OS, which is what makes
+"they're all identical" true rather than aspirational.
+
+**Updates are staged, not applied underneath you.** `bootc upgrade` fetches and
+prepares the next deployment while you carry on working; it becomes real at the
+next reboot. There is no window where half the new packages are installed.
+
+**The previous system is still on the disk.** Rolling back is a reboot, not a
+restore from backup - see below.
+
+**What you ship is what you tested.** The image CI built and signed is
+bit-for-bit the one that installs. And because this template requires
+signatures, a machine will refuse an image that is not yours.
+
+The costs, honestly: adding a package means a rebuild and a reboot rather than
+`dnf install`; `/var` is not versioned and never rolls back; and a hand-edited
+file in `/etc` silently stops tracking the image, which is the subject of the
+next section.
+
+## Recovering from a bad change
+
+Three directories, three different rules. Knowing which one you broke tells you
+which fix applies.
+
+| | comes from | on rollback |
+| --- | --- | --- |
+| `/usr` | the image, read-only | always reverted |
+| `/etc` | image defaults, 3-way merged with your edits | reverted only if the edit is newer than the deployment you roll back to |
+| `/var` | the machine, shared by every deployment | **never** reverted |
+
+**Find out what you changed.** `/etc` is merged rather than replaced, so ostree
+knows exactly which files differ from the image:
+
+```bash
+sudo ostree admin config-diff        # M = modified, A = added, D = deleted
+```
+
+**Undo one file.** The image's own copy lives at `/usr/etc` on an installed
+system, so putting a file back is a copy:
+
+```bash
+sudo cp /usr/etc/fstab /etc/fstab
+```
+
+That is usually better than rolling the whole system back: you keep the current
+image and undo only what you broke.
+
+**Go back to the previous image.**
+
+```bash
+bootc status                         # what is booted, staged and rollback
+sudo bootc rollback && systemctl reboot
+```
+
+If the machine will not boot far enough to run that, pick the previous entry in
+the boot menu - the same thing, chosen earlier. Both work because the old
+deployment is still on disk.
+
+One catch worth knowing before you need it: rollback restores the `/etc` that
+deployment had. An edit you made *since* booting the current image is undone. An
+edit you made *before* the last upgrade was merged forward into both, so it
+survives - use `config-diff` and `/usr/etc` for that one.
+
+**Keep a known-good deployment from being pruned.**
+
+```bash
+sudo ostree admin pin 0              # or: pin booted
+```
+
+**Try something without rebuilding.** A transient overlay on `/usr`, gone at the
+next reboot - for testing whether a package fixes something, not for running
+that way:
+
+```bash
+sudo bootc usr-overlay
+sudo dnf install <package>           # vanishes on reboot
+```
+
+If it does fix it, put it in `rpm_packages` and rebuild. That is the loop this
+template exists for: the machine is not where changes live.
 
 ## Updating from the template
 
