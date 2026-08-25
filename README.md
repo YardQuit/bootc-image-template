@@ -174,6 +174,22 @@ entirely.
    `rpm-ostree rebase ostree-unverified-registry:ghcr.io/myorg/mydesktop:latest`
    instead.
 
+   The `unverified` in that refspec is deliberate, and it is not a gap in the
+   signing this template sets up. It is a bootstrap: the public key that proves
+   the image is *inside* the image, so the stock Fedora system you are rebasing
+   away from has no way to check the first pull - no key, no `sigstoreSigned`
+   rule, no registries.d entry telling it to look for a signature. Every upgrade
+   after that first boot **is** verified, because the image carries all three;
+   see "Verifying updates on the running system".
+
+   To verify the first hop too, put those three on the machine by hand before
+   rebasing - the key somewhere like `/etc/pki/containers/`, a `sigstoreSigned`
+   rule for your repository in `/etc/containers/policy.json`, and a registries.d
+   file with `use-sigstore-attachments: true` - then rebase with
+   `ostree-image-signed:registry:` instead. That is a manual bootstrap of trust:
+   you are getting the key to the machine by some route you already trust,
+   rather than from the image you are about to start trusting.
+
 The first push also creates the package on GitHub. It starts out **private** -
 open *Packages -> your image -> Package settings* and make it public if you
 want to install it without logging in to `ghcr.io`.
@@ -851,12 +867,30 @@ Three things make it check, and all three are active in the template:
    (containers/image reads this only from `/etc/containers/registries.d` - there
    is no `/usr` location, so it has to ship under `sysfiles/etc/`.)
 
-Two things worth knowing about running this way:
+What this does **not** constrain is worth stating, because it looks broader
+than it is. The rule is scoped to your repository and the policy's `default`
+stays `insecureAcceptAnything`, so nothing else changes: `bootc usr-overlay`
+then `dnf install` works (those are RPMs, GPG-checked by rpm - `policy.json`
+has no opinion on them), so does `rpm-ostree install`, so do Flatpaks, and so
+does pulling any other image with podman, toolbox or distrobox. The one thing
+it constrains is `bootc upgrade` and `bootc switch` *to your own repository*,
+which is the entire intent.
+
+Four things worth knowing about running this way:
 
 * Verification is **mandatory** for that repository. If signing ever breaks,
   `bootc upgrade` refuses to install rather than silently accepting an
   unverified image - which is the point, but it does mean a broken signing step
   now blocks updates.
+* Rotating the key has an order to it, because the public half ships *inside*
+  the image. Build an image carrying the **new** key but signed with the
+  **old** one, let every machine take that update, and only then switch CI to
+  sign with the new key. The other order strands machines: they demand a key
+  they have not been given yet.
+* A stranded machine is not lost. `/etc` belongs to the machine rather than to
+  the image, so editing `/etc/containers/policy.json` there to relax the rule
+  lets the next update through, after which the new image's own policy takes
+  over again.
 * cosign 3.x writes signatures in the OCI 1.1 referrers format, which
   containers/image cannot read yet. `build.yml` pins cosign to the 2.x series
   for exactly this reason; if you unpin it, verification will start failing with
