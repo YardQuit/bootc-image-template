@@ -408,7 +408,7 @@ shellcheck --severity=warning --exclude=SC1090 \
 | `tests/set-image-name.test.sh` | The rename script's guards. |
 | `tests/build-disk-guard.test.sh` | The `disk.toml` placeholder-password guard. |
 | `tests/readme-toc.test.sh` | That this README's table of contents still matches its headings. |
-| `tests/build-sh-blocks.test.sh` | That every `# ----` block in `build.sh` closes, is wholly commented, and still parses once uncommented. |
+| `tests/build-sh-blocks.test.sh` | That every `# ----` block in `build.sh` is formed, closes, is switched wholly on or wholly off, and still parses once uncommented. |
 
 `.github/workflows/checks.yml` runs all of them on every push and pull request,
 along with a parse of every YAML and TOML file in the repository. It needs no
@@ -444,10 +444,17 @@ first symptom is a machine that cannot upgrade.
 The `# ----` blocks get a suite because they make a promise: uncomment every
 line from one ruler to the other and the feature is on, with nothing to find
 elsewhere in the file. Breaking that is easy and quiet - add a command outside
-the rulers, leave one inside them already live, drop a closing ruler - and
-nobody finds out until someone enables the feature and gets a build that fails,
-or one that succeeds while silently missing a step. So the test uncomments each
-block exactly as the file says to and hands the result to `bash -n`.
+the rulers, flip half the lines inside them, drop a closing ruler - and nobody
+finds out until someone enables the feature and gets a build that fails, or one
+that succeeds while silently missing a step. So the test uncomments each block
+exactly as the file says to and hands the result to `bash -n`.
+
+The half-on check is the one that earns its keep in *your* repository rather
+than in the template: here the blocks all ship switched off, but a project built
+from this one turns them on, and a block left half flipped is a feature half
+enabled. Prose inside a block is ignored, because `# ## note` becomes `## note`
+when the block is switched on and stays a comment either way - only the commands
+say which state the block is in.
 
 The `disk.toml` guard gets them for the mirror-image reason. Refusing the
 placeholder is the half that is obvious to test; letting a correctly configured
