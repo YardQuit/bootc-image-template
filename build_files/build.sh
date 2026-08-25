@@ -128,6 +128,25 @@ echo "${DONKEY_SHA256}  /etc/skel/.config/emacs/donkey/donkey.el" | sha256sum -c
 ## so it allocates them from the human range (1000, 1001) - the same range the
 ## first real user gets. Creating them as system groups first means the package
 ## reuses them, and the setgid helper binaries end up owned by a system group.
+##
+## groupadd writes them into this image's /etc/group and nowhere else, which
+## "bootc container lint" reports the moment you uncomment the two lines below:
+##
+##   sysusers: Found /etc/group entry without corresponding systemd sysusers.d:
+##     onepassword
+##     onepassword-mcp
+##
+## A warning rather than an error, and worth acting on: /etc is per-deployment
+## and merged on every update, so a group that lives only there is one a future
+## merge can drop - taking the ownership of those setgid binaries with it. The
+## durable half is a file systemd reads from /usr on every boot. Ship it as
+## build_files/sysfiles/usr/lib/sysusers.d/10-onepassword.conf, containing:
+##
+##   g onepassword -
+##   g onepassword-mcp -
+##
+## Both halves, not one or the other: the RPM below wants the groups to exist
+## before it installs, and a sysusers.d file is not read until boot.
 
 # groupadd -r onepassword
 # groupadd -r onepassword-mcp
@@ -486,6 +505,17 @@ systemctl mask systemd-remount-fs.service
 ## every base the Containerfile offers. The second does, so it brings its own
 ## install line - Fedora packages tailscale itself, in the always-enabled
 ## "fedora" and "updates" repos, so no third-party repo is involved.
+##
+## Uncommenting tailscale earns one lint warning on the next build:
+##
+##   var-tmpfiles: Found content in /var missing systemd tmpfiles.d entries:
+##     d /var/lib/tailscale 0600 root root - -
+##
+## The package creates that directory and ships no tmpfiles.d rule for it, so
+## on an installed machine it would simply be absent - /var is reset on every
+## deployment. Paste the line lint printed into
+## build_files/sysfiles/usr/lib/tmpfiles.d/10-image-var-dirs.conf, which exists
+## for this and says as much at the top.
 
 # systemctl enable sshd.service
 
