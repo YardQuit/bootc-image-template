@@ -4,17 +4,20 @@
 # One flat list, sorted alphabetically - easier to scan and to keep tidy than
 # grouped sections. Anything in the repos enabled in your base image works here.
 # To check a name before adding it:  dnf info <package>
+#
+# Not every package the image installs is here, deliberately. Anything a later
+# section of build.sh needs by name - tuned and firewalld for the units it
+# enables, plymouth for the splash screen - is installed there instead, beside
+# the thing that needs it. Rewriting this list is expected; losing a service
+# out of the image while doing it is not, and that is what the split prevents.
 
 bat
 btop
-cronie-anacron
-crontabs
 distrobox
 dnf5-plugins
 emacs
 fastfetch
 fd-find
-firewalld
 fzf
 helix
 htop
@@ -22,13 +25,10 @@ jetbrains-mono-fonts-all
 neovim
 NetworkManager-tui
 pam_yubico
-plymouth
-plymouth-system-theme
 podman-compose
 ripgrep
 tcpdump
 tmux
-tuned
 wireguard-tools
 wl-clipboard
 zoxide

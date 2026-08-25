@@ -256,12 +256,52 @@ PACKAGES=$({ grep -vE '^\s*(#|$)' "${CTX}/rpm_packages" || true; } | tr '\n' ' '
 ## The flag differs too - dnf 4 has no --skip-unavailable, and its equivalent is
 ## strict=0 - so swapping the binary alone is not enough. Without this the very
 ## first package install dies on a base the Containerfile offers by name.
-if [ -n "${PACKAGES}" ]; then
+##
+## Two functions, because this file installs two kinds of package and they want
+## opposite behaviour when a name turns out to be missing:
+##
+##   pkg_install_optional   the rpm_packages list. A missing name is recorded
+##                          and the build carries on, as described above.
+##   pkg_install            a package a later section needs by name. A missing
+##                          one stops the build there and then, where the
+##                          package is named - not three sections later, where
+##                          only a systemd unit is.
+##
+## Both are safe to call for something the base already has: dnf says it is
+## installed and exits 0.
+##
+## Both also clean up after themselves. dnf leaves repo metadata under
+## /var/lib/dnf and lock files under /run, both of which land in the image and
+## both of which "bootc container lint" flags - as "content in runtime-only
+## directories" and "content in /var missing systemd tmpfiles.d entries". That
+## used to be a single "rm -rf" in section 7, which was right only while this
+## section was the last thing to run dnf. Sections 8 and 9b install too, and an
+## install after that point puts the pair straight back. Cleaning inside the
+## installer cannot be outlived by an install added later.
+pkg_cleanup() {
+    rm -rf /var/lib/dnf /run/dnf
+}
+
+pkg_install_optional() {
     if command -v dnf5 >/dev/null 2>&1; then
-        dnf5 install --skip-unavailable -y ${PACKAGES}
+        dnf5 install --skip-unavailable -y "$@"
     else
-        dnf install --setopt=strict=0 -y ${PACKAGES}
+        dnf install --setopt=strict=0 -y "$@"
     fi
+    pkg_cleanup
+}
+
+pkg_install() {
+    if command -v dnf5 >/dev/null 2>&1; then
+        dnf5 install -y "$@"
+    else
+        dnf install -y "$@"
+    fi
+    pkg_cleanup
+}
+
+if [ -n "${PACKAGES}" ]; then
+    pkg_install_optional ${PACKAGES}
 fi
 
 install -d -m 0755 /usr/share/image-build
@@ -329,22 +369,34 @@ rm -f /etc/skel/.emacs
 ## Containerfile: without them /var/cache is ordinary image content, and a few
 ## hundred megabytes of it.
 ##
-## What does end up in the image is what dnf leaves outside those mounts: repo
-## metadata under /var/lib/dnf and lock files under /run. Both are runtime state
-## rather than image content, and "bootc container lint" flags them as "content
-## in runtime-only directories" and "content in /var missing systemd tmpfiles.d
-## entries".
-rm -rf /var/lib/dnf /run/dnf
+## The state dnf does leave outside those mounts - repo metadata under
+## /var/lib/dnf, lock files under /run - is removed by pkg_cleanup, which runs
+## as part of every install rather than once here. See section 3 for why: this
+## spot is no longer after the last dnf invocation.
 
 ### 8. Enable systemd units #################################################
 ##
-## The units must exist in the image (i.e. their package is installed above).
+## The units have to exist in the image, so the packages carrying them are
+## installed right here rather than left to rpm_packages. That list is one you
+## are meant to rewrite, and a rewrite that drops one of these does not fail
+## where you edited it - it fails here, with
+##
+##   Failed to enable unit: Unit tuned.service does not exist
+##
+## which points at systemd rather than at the line you deleted. Installing them
+## beside the enable also means a feature you do not want is two adjacent lines
+## to comment out, instead of an edit in two files that have to agree.
+##
+## podman.socket, fstrim.timer and the bootc timer further down need nothing
+## added: every base the Containerfile offers already ships them.
+pkg_install tuned firewalld crontabs cronie-anacron
+
 systemctl enable podman.socket
 systemctl enable fstrim.timer
 
-## tuned and firewalld come from rpm_packages. Fedora's presets already enable
-## both the moment they are installed - saying so here is explicit rather than
-## depending on a preset that could change under you.
+## Fedora's presets already enable tuned and firewalld the moment they are
+## installed - saying so here is explicit rather than depending on a preset
+## that could change under you.
 systemctl enable tuned.service
 systemctl enable firewalld.service
 
@@ -411,10 +463,16 @@ systemctl enable bootc-fetch-apply-updates.timer
 ## ever build this image on a base that does not use composefs for /.
 systemctl mask systemd-remount-fs.service
 
-## Examples:
+## Examples. The first needs no package: openssh-server is already installed in
+## every base the Containerfile offers. The second does, so it brings its own
+## install line - Fedora packages tailscale itself, in the always-enabled
+## "fedora" and "updates" repos, so no third-party repo is involved.
 
 # systemctl enable sshd.service
-# systemctl enable tailscaled.service   # needs a third-party repo, section 6
+
+# pkg_install tailscale
+# systemctl enable tailscaled.service
+
 # systemctl --global enable some-user-unit.service   # for every user session
 
 ### 9. Optional: tweak configuration ########################################
@@ -565,13 +623,17 @@ sed -i '/^REDHAT_BUGZILLA_PRODUCT=/d
 ##      neither, and installing the package is not enough on its own - the
 ##      initramfs is prebuilt in the base and a layered package does not change
 ##      it, so it has to be regenerated here. (plymouth and
-##      plymouth-system-theme are in rpm_packages.)
+##      plymouth-system-theme are installed just below, for the same reason
+##      section 8 installs its own: a rewritten rpm_packages must not be able
+##      to take the splash screen with it.)
 ##   2. the "rhgb" kernel argument, which is what tells plymouth to draw
 ##      anything. That is shipped as
 ##      build_files/sysfiles/usr/lib/bootc/kargs.d/00-graphical-boot.toml and
 ##      applied by bootc when the image is installed or switched to; "bootc
 ##      container lint" parses the file, so a mistake in it fails the build.
-##
+
+pkg_install plymouth plymouth-system-theme
+
 ## A bootc image carries exactly one kernel, so this glob resolves to one entry.
 KVER="$(basename /usr/lib/modules/*)"
 INITRAMFS="/usr/lib/modules/${KVER}/initramfs.img"

@@ -4,6 +4,11 @@ A template for building your own bootable container image (a "bootc" image):
 a full operating system defined by a `Containerfile`, built by GitHub Actions,
 published to `ghcr.io`, and installed with `bootc switch` or from an ISO.
 
+It is for **RPM-based** bases: `build_files/build.sh` installs with `dnf5` or
+`dnf` and records what arrived with `rpm`. Fedora and CentOS Stream are what it
+is built and tested on - the full list is under
+[What you need](#what-you-need).
+
 Everything here is plain YAML, TOML and Bash - no build tool to install, no
 generated files, nothing hidden.
 
@@ -76,6 +81,26 @@ Commented examples, off by default, cover packages that install into `/opt`
 - `cosign`, once, to create the signing key pair the build requires - see
   "Signing" below.
 - `podman` if you want to build locally. Nothing else is required for CI.
+- An RPM-based bootc base image. Which ones, and how sure, below.
+
+**Bases.** `build.sh` speaks dnf and rpm, so the base has to as well. The ISO
+path is narrower still: `--type iso` is built by `bootc-image-builder`, which
+assembles an Anaconda installer out of dnf repositories, so ISOs exist for
+Fedora and CentOS and nowhere else. Container and disk images are not affected.
+
+| Base | Status |
+| --- | --- |
+| `quay.io/fedora-ostree-desktops/*` - `silverblue`, `kinoite`, `cosmic-atomic`, `sway-atomic`, `xfce-atomic`, `budgie-atomic`, `lxqt-atomic`, `base-atomic` | the default (`silverblue`); built and tested |
+| `quay.io/fedora/fedora-bootc` | built and tested |
+| `quay.io/centos-bootc/centos-bootc` | built and tested. Its repositories carry a different package set - 16 of the 21 names in `rpm_packages` do not exist there - so expect to reconcile that list rather than inherit it |
+| Red Hat's `rhel-bootc` images | not tested here. Same family (dnf, rpm, dracut), so it should work, but pulling the base needs a subscription and its repositories need entitlement inside the build |
+| AlmaLinux / Rocky bootc images | not tested here. CentOS Stream rebuilds, so expect them to behave like it |
+| `quay.io/hummingbird-community/bootc-os` - Red Hat's Project Hummingbird, itself experimental | builds, with edits. The machinery is all there (Fedora-derived, `dnf5`, `rpm`, `dracut`), but its repository carries almost none of the defaults: 19 of the 21 names in `rpm_packages` are missing, and so are `tuned`, `crontabs`, `cronie-anacron` and `plymouth`, so sections 8 and 9b need trimming. Disk images build; ISOs do not - `bootc-image-builder` has no distro definition for it |
+
+openSUSE is **not** supported. It is RPM, but it is zypper rather than dnf, and
+there is no bootc base image to start from - the package sections of `build.sh`
+would have to be rewritten. Non-RPM bases (Debian, Ubuntu, Arch) are further
+out again, and would lose the ISO path entirely.
 
 ## Quick start
 
@@ -178,6 +203,15 @@ rides the newest, so it can never be pruned away. Change
 **Packages** - add them to `build_files/rpm_packages`, one per line. It is one
 flat alphabetical list rather than grouped sections, so a name is easy to find
 and easy to slot in. Check a name first with `dnf info <package>`.
+
+Not everything the image installs is on that list. Anything a later section of
+`build.sh` needs *by name* - `tuned` and `firewalld` for the units section 8
+enables, `crontabs` and `cronie-anacron` for `crond`, `plymouth` for the splash
+screen - is installed in `build.sh` itself, next to the thing that needs it.
+Rewriting `rpm_packages` is expected; losing a service out of the image while
+doing it is not. Those installs are also not skippable, unlike the list itself:
+a name the repositories cannot provide stops the build where the package is
+named, rather than three sections later where a systemd unit is.
 
 A name the repos do not provide does not fail the build - `--skip-unavailable`
 is deliberate, because a new Fedora release renames, merges and drops packages,
@@ -757,7 +791,8 @@ where you make the edit.
 A splash screen instead of a wall of kernel messages needs three things, and a
 plain `fedora-bootc` base has none of them:
 
-1. `plymouth` and `plymouth-system-theme` installed - both are in
+1. `plymouth` and `plymouth-system-theme` installed - section 9b of
+   `build_files/build.sh` does that itself, rather than relying on
    `rpm_packages`.
 2. plymouth *inside the initramfs*. This is the part that catches people out:
    the initramfs is prebuilt in the base image, and layering a package on top
