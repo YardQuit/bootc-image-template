@@ -20,10 +20,13 @@ set -euxo pipefail
 CTX="/ctx"   # where the Containerfile mounted build_files/
 
 
-### 1. Copy files into the image ############################################
+#############################################################################
+## 1. Copy files into the image 
+#############################################################################
 ##
 ## Anything under build_files/sysfiles/ is copied to / with the same layout,
 ## so build_files/sysfiles/etc/motd.d/10-welcome lands at /etc/motd.d/10-welcome.
+
 if [ -d "${CTX}/sysfiles" ]; then
     cp -rv "${CTX}/sysfiles/." /
 fi
@@ -33,7 +36,9 @@ fi
 chmod -R +x /etc/cron.daily 2>/dev/null || true
 
 
-### 1a. Donkey - modal editing for Emacs ####################################
+#############################################################################
+## 1a. Donkey - modal editing for Emacs
+#############################################################################
 ##
 ## donkey.el is not packaged in any repo, so fetch it at build time and seed
 ## it through /etc/skel, next to the init.el/config.el that section 1 just
@@ -49,12 +54,14 @@ chmod -R +x /etc/cron.daily 2>/dev/null || true
 ##
 ##   COMMIT=$(git ls-remote https://github.com/YardQuit/donkey master | awk '{print $1}')
 ##   echo $COMMIT; curl -fsSL https://raw.githubusercontent.com/YardQuit/donkey/$COMMIT/donkey.el | sha256sum
+
 DONKEY_COMMIT="c4a61bde229420a71f30733664ad6b3ac6c336e5"   # 1.4.0
 DONKEY_SHA256="3e07b21c2d94b57908e332cb200d773ca0ce4d3ea2a9623e18096e4fcb895fb5"
 
 ## The directory is created explicitly: curl's --create-dirs would make it
 ## 0750, and /etc/skel content must be world-readable or copying it by hand
 ## into an existing account fails (section 1's sysfiles copy ships 0755).
+
 install -d -m 0755 /etc/skel/.config/emacs/donkey
 
 ## --retry absorbs the transient registry blip that would otherwise abort a
@@ -68,18 +75,23 @@ install -d -m 0755 /etc/skel/.config/emacs/donkey
 ## bound plus one attempt. Without it a server dribbling just fast enough to
 ## dodge the speed check could hold the build for every retry's full
 ## max-time in a row.
+
 curl -fL --retry 3 --retry-all-errors --connect-timeout 15 \
     --speed-limit 1 --speed-time 30 --max-time 120 --retry-max-time 300 \
     -o /etc/skel/.config/emacs/donkey/donkey.el \
     "https://raw.githubusercontent.com/YardQuit/donkey/${DONKEY_COMMIT}/donkey.el"
+
 ## curl creates the file with the build's umask - pin the mode the same way
 ## install -d pinned the directory's, or a hardened builder (umask 027) ships
 ## a donkey.el other users cannot read.
+
 chmod 0644 /etc/skel/.config/emacs/donkey/donkey.el
 echo "${DONKEY_SHA256}  /etc/skel/.config/emacs/donkey/donkey.el" | sha256sum -c -
 
 
-### 2. Packages that install into /opt ######################################
+#############################################################################
+## 2. Packages that install into /opt
+#############################################################################
 ##
 ## Skip this unless you install something that lives in /opt - Chrome, various
 ## vendor RPMs, some proprietary tools.
@@ -99,7 +111,8 @@ echo "${DONKEY_SHA256}  /etc/skel/.config/emacs/donkey/donkey.el" | sha256sum -c
 ## lines, so enabling one of those needs nothing from here. Uncomment it here
 ## when you install some other package that lives in /opt.
 
-# --- /opt as a real directory: uncomment to the next ruler ------------------
+# --- /opt as a real directory: uncomment to the next ruler
+# --------------------------------------------------------------------------
 # if [ -L /opt ]; then
 #     rm /opt
 #     mkdir /opt
@@ -110,7 +123,8 @@ echo "${DONKEY_SHA256}  /etc/skel/.config/emacs/donkey/donkey.el" | sha256sum -c
 ## directories to /var and leave a symlink behind - this is what the bootc
 ## documentation recommends:
 
-# --- an /opt package that writes inside its own directory -------------------
+# --- an /opt package that writes inside its own directory
+# --------------------------------------------------------------------------
 # dnf5 -y install examplepkg
 # mv /opt/examplepkg/logs /var/log/examplepkg
 # ln -sr /var/log/examplepkg /opt/examplepkg/logs
@@ -127,7 +141,9 @@ echo "${DONKEY_SHA256}  /etc/skel/.config/emacs/donkey/donkey.el" | sha256sum -c
 ## system (a container, a Flatpak, or a per-machine install).
 
 
-### 2a. Example of such a package: 1Password (Fedora) #######################
+#############################################################################
+## 2a. Example of such a package: 1Password (Fedora)
+#############################################################################
 ##
 ## Ready to use: uncomment every line between the rulers below, and nothing
 ## else in this file has to change. The optional extra further down has rulers
@@ -167,24 +183,28 @@ echo "${DONKEY_SHA256}  /etc/skel/.config/emacs/donkey/donkey.el" | sha256sum -c
 ## Both halves, not one or the other: the RPM below wants the groups to exist
 ## before it installs, and a sysusers.d file is not read until boot.
 
-# --- 1Password: uncomment every line down to the next ruler -----------------
+# --- 1Password: uncomment every line down to the next ruler
+# --------------------------------------------------------------------------
 # ## /opt has to be a real directory before anything installs into it. The same
 # ## four lines as section 2, and harmless if that block is enabled as well.
+
 # if [ -L /opt ]; then
 #     rm /opt
 #     mkdir /opt
 # fi
-#
+
 # ## System groups, so the package reuses them instead of allocating from the
 # ## human range. Worth pairing with the sysusers.d file described above.
+
 # groupadd -r onepassword
 # groupadd -r onepassword-mcp
-#
+
 # rpm --import https://downloads.1password.com/linux/keys/1password.asc
 # dnf5 -y install https://downloads.1password.com/linux/rpm/stable/x86_64/1password-latest.rpm
-#
+
 # ## The package drops in a dnf repository for its own auto-updates. An image
 # ## updates when you rebuild it, so the file has no purpose here.
+
 # rm -f /etc/yum.repos.d/1password.repo
 # --------------------------------------------------------------------------
 
@@ -209,7 +229,8 @@ echo "${DONKEY_SHA256}  /etc/skel/.config/emacs/donkey/donkey.el" | sha256sum -c
 ##    Leave the command commented out if you have not created that file: the
 ##    build stops on a missing source.
 
-# --- 1Password, optional: the polkit policy from your own file --------------
+# --- 1Password, optional: the polkit policy from your own file
+# --------------------------------------------------------------------------
 # install -Dm0644 \
 #     /ctx/sysfiles/usr/share/polkit-1/actions/com.1password.1Password.policy \
 #     /usr/share/polkit-1/actions/com.1password.1Password.policy
@@ -220,7 +241,9 @@ echo "${DONKEY_SHA256}  /etc/skel/.config/emacs/donkey/donkey.el" | sha256sum -c
 ##    happens during the build and travels in the image, which is what you want.
 
 
-### 2b. Example of such a package: MEGAsync (Fedora) ########################
+#############################################################################
+## 2b. Example of such a package: MEGAsync (Fedora)
+#############################################################################
 ##
 ## Ready to use: uncomment every line between the rulers below, and nothing
 ## else in this file has to change. The command-line client further down has
@@ -249,7 +272,8 @@ echo "${DONKEY_SHA256}  /etc/skel/.config/emacs/donkey/donkey.el" | sha256sum -c
 ## - a genuine download or dependency failure still stops the build. The same
 ## shape works for any vendor RPM with a scriptlet that misbehaves in a container.
 
-# --- MEGAsync: uncomment every line down to the next ruler ------------------
+# --- MEGAsync: uncomment every line down to the next ruler
+# --------------------------------------------------------------------------
 # ## /opt has to be a real directory before anything installs into it. The same
 # ## four lines as section 2, and harmless if that block is enabled as well.
 # if [ -L /opt ]; then
@@ -272,7 +296,8 @@ echo "${DONKEY_SHA256}  /etc/skel/.config/emacs/donkey/donkey.el" | sha256sum -c
 
 ## The command line client is published the same way, if you prefer it:
 
-# --- MEGAcmd, the command line client, instead of or as well as the above ---
+# --- MEGAcmd, the command line client, instead of or as well as the above
+# --------------------------------------------------------------------------
 # dnf5 -y install https://mega.nz/linux/repo/Fedora_44/x86_64/megacmd-Fedora_44.x86_64.rpm
 # --------------------------------------------------------------------------
 
@@ -281,7 +306,9 @@ echo "${DONKEY_SHA256}  /etc/skel/.config/emacs/donkey/donkey.el" | sha256sum -c
 ## tree along with it.
 
 
-### 3. Install packages #####################################################
+#############################################################################
+## 3. Install packages
+#############################################################################
 ##
 ## build_files/rpm_packages is a plain list, one package per line.
 ## Blank lines and lines starting with # are ignored.
@@ -289,6 +316,7 @@ echo "${DONKEY_SHA256}  /etc/skel/.config/emacs/donkey/donkey.el" | sha256sum -c
 ## aborts the build here - silently, with no message, and before the emptiness
 ## check below can say anything. Commenting out every line is a legitimate way
 ## to build a bare image, so it has to reach that check.
+
 PACKAGES=$({ grep -vE '^\s*(#|$)' "${CTX}/rpm_packages" || true; } | tr '\n' ' ')
 
 ## --skip-unavailable keeps the build going when a package is missing from the
@@ -349,6 +377,7 @@ PACKAGES=$({ grep -vE '^\s*(#|$)' "${CTX}/rpm_packages" || true; } | tr '\n' ' '
 ## registry.suse.com or quay - and an installer this template can drive is not
 ## the same thing as a base bootc can boot. A branch nothing can run is a
 ## branch nothing can test, which is how it would come to be wrong quietly.
+
 if ! command -v dnf >/dev/null 2>&1; then
     echo "ERROR: this base has no dnf, so nothing here can install a package." >&2
     echo "Every base the Containerfile offers has one - on Fedora it is dnf5" >&2
@@ -365,12 +394,14 @@ fi
 ## section was the last thing to run dnf. Sections 8 and 9b install too, and an
 ## install after that point puts the pair straight back. Cleaning inside the
 ## installer cannot be outlived by an install added later.
+
 pkg_cleanup() {
     rm -rf /var/lib/dnf /run/dnf
 }
 
 ## The rpm_packages list: a name that cannot be installed is recorded and the
 ## build carries on.
+
 pkg_install_optional() {
     dnf install --setopt=strict=0 -y "$@"
     pkg_cleanup
@@ -380,6 +411,7 @@ pkg_install_optional() {
 ## stops the build where the package is named, rather than three sections later
 ## where only a systemd unit is. Safe to call for something the base already
 ## has - dnf says so and exits 0.
+
 pkg_install() {
     dnf install -y "$@"
     pkg_cleanup
@@ -413,43 +445,50 @@ fi
 rm -f /etc/skel/.emacs
 
 ## Example: install a whole package group instead of single packages
+## dnf5 group install --skip-unavailable -y cosmic-desktop
 
-# dnf5 group install --skip-unavailable -y cosmic-desktop
 
-
-### 4. Optional: packages from COPR repos ###################################
+#############################################################################
+## 4. Optional: packages from COPR repos
+#############################################################################
 ##
 ## Enable the repo, install, then disable it again so the finished image does
 ## not keep pulling from it at runtime.
 
-# --- starship from COPR: uncomment every line down to the next ruler --------
+# --- starship from COPR: uncomment every line down to the next ruler
+# --------------------------------------------------------------------------
 # dnf5 -y copr enable atim/starship
 # dnf5 -y install starship
 # dnf5 -y copr disable atim/starship
 # --------------------------------------------------------------------------
 
 
-### 5. Optional: RPMs from a URL ############################################
-
+#############################################################################
+## 5. Optional: RPMs from a URL
+#############################################################################
 ##
 ## dnf5 can install straight from a URL - no need to download first, and no
 ## repository on the finished system.
-
-# dnf5 -y install https://example.com/downloads/some-package.x86_64.rpm
+## dnf5 -y install https://example.com/downloads/some-package.x86_64.rpm
 
 ## Sections 2a and 2b are complete, ready-to-uncomment examples of this
 ## (1Password and MEGAsync).
 
 
-### 6. Optional: third-party repos ##########################################
+#############################################################################
+## 6. Optional: third-party repos
+#############################################################################
 
-# --- a third-party repo: uncomment every line down to the next ruler --------
+# --- a third-party repo: uncomment every line down to the next ruler
+# --------------------------------------------------------------------------
 # dnf5 config-manager addrepo --from-repofile=https://example.com/example.repo
 # dnf5 -y install example-package
 # --------------------------------------------------------------------------
 
 
-### 7. Clean up #############################################################
+#############################################################################
+## 7. Clean up
+#############################################################################
 ##
 ## There is no "dnf clean all" here, and that is deliberate. The Containerfile
 ## mounts /var/cache and /var/log as build caches, so dnf's downloads and logs
@@ -468,7 +507,9 @@ rm -f /etc/skel/.emacs
 ## spot is no longer after the last dnf invocation.
 
 
-### 8. Enable systemd units #################################################
+#############################################################################
+## 8. Enable systemd units
+#############################################################################
 ##
 ## The units have to exist in the image, so the packages carrying them are
 ## installed right here rather than left to rpm_packages. That list is one you
@@ -483,6 +524,7 @@ rm -f /etc/skel/.emacs
 ##
 ## podman.socket, fstrim.timer and the bootc timer further down need nothing
 ## added: every base the Containerfile offers already ships them.
+
 pkg_install tuned firewalld crontabs cronie-anacron
 
 systemctl enable podman.socket
@@ -491,6 +533,7 @@ systemctl enable fstrim.timer
 ## Fedora's presets already enable tuned and firewalld the moment they are
 ## installed - saying so here is explicit rather than depending on a preset
 ## that could change under you.
+
 systemctl enable tuned.service
 systemctl enable firewalld.service
 
@@ -502,12 +545,14 @@ systemctl enable firewalld.service
 ## being skipped for the day. /var/spool/anacron is recreated on every boot by
 ## the tmpfiles.d rule the cronie-anacron package ships, so it needs nothing
 ## from section 10.
+
 systemctl enable crond.service
 
 ## Automatic updates. bootc ships this timer in the base image, disabled: it
 ## fires an hour after boot, then every 8 hours with up to 2 hours of jitter -
 ## roughly three checks a day, which costs nothing but a manifest fetch when
 ## nothing has changed.
+
 systemctl enable bootc-fetch-apply-updates.timer
 
 ## The stock unit runs "bootc upgrade --apply", and --apply reboots the moment a
@@ -573,9 +618,13 @@ systemctl mask systemd-remount-fs.service
 ## build_files/sysfiles/usr/lib/tmpfiles.d/10-image-var-dirs.conf, which exists
 ## for this and says as much at the top.
 
+# --- SSH Server: uncomment every line down to the next ruler
+# --------------------------------------------------------------------------
 # systemctl enable sshd.service
+# --------------------------------------------------------------------------
 
-# --- Tailscale: uncomment every line down to the next ruler -----------------
+# --- Tailscale: uncomment every line down to the next ruler
+# --------------------------------------------------------------------------
 # pkg_install tailscale
 # systemctl enable tailscaled.service
 # --------------------------------------------------------------------------
@@ -583,7 +632,9 @@ systemctl mask systemd-remount-fs.service
 # systemctl --global enable some-user-unit.service   # for every user session
 
 
-### 9. Optional: tweak configuration ########################################
+#############################################################################
+## 9. Optional: tweak configuration
+#############################################################################
 ##
 ## Edit config files with sed, and keep a .bak so the change is obvious:
 ##
@@ -597,7 +648,8 @@ systemctl mask systemd-remount-fs.service
 ## regular file. Resolve it first, then edit the real target, then check the
 ## result - for a firewall setting a silent no-op is the worst outcome.
 
-# --- firewalld default zone: uncomment every line to the next ruler ---------
+# --- firewalld default zone: uncomment every line to the next ruler
+# --------------------------------------------------------------------------
 # FIREWALLD_CONF="$(readlink -f /etc/firewalld/firewalld.conf)"
 # cp "${FIREWALLD_CONF}" "${FIREWALLD_CONF}.bak"
 # if grep -q '^DefaultZone=' "${FIREWALLD_CONF}"; then
@@ -618,7 +670,8 @@ systemctl mask systemd-remount-fs.service
 ## You must also enrol a key (ykpamcfg -2) before booting the image, or sudo will
 ## reject you; /etc/pam.d/sudo.bak is left behind for recovery.
 
-# --- YubiKey for sudo: uncomment every line down to the next ruler ----------
+# --- YubiKey for sudo: uncomment every line down to the next ruler
+# --------------------------------------------------------------------------
 # if ! find /usr/lib64/security /usr/lib/security -name pam_yubico.so -print -quit 2>/dev/null | grep -q .; then
 #     echo "ERROR: pam_yubico.so not found - refusing to edit /etc/pam.d/sudo." >&2
 #     exit 1
@@ -628,7 +681,9 @@ systemctl mask systemd-remount-fs.service
 # --------------------------------------------------------------------------
 
 
-### 9a. Identify this image in /etc/os-release ##############################
+#############################################################################
+## 9a. Identify this image in /etc/os-release
+#############################################################################
 ##
 ## os-release(5) is what hostnamectl, the desktop's About page, fastfetch, the
 ## bootloader entries and abrt read to decide what this machine is running.
@@ -662,14 +717,14 @@ systemctl mask systemd-remount-fs.service
 ## /etc/os-release is a symlink to ../usr/lib/os-release, and "sed -i" through a
 ## symlink replaces the symlink with a regular file, so resolve it first - the
 ## same trap as firewalld.conf above.
-##
+
 OS_RELEASE="$(readlink -f /etc/os-release)"
 cp "${OS_RELEASE}" "${OS_RELEASE}.bak"
-##
+
 ## Substitute a key if the base defines it, append it if not: VARIANT usually
 ## exists but IMAGE_ID does not, and a plain "sed -i" would silently do nothing
 ## for the second kind.
-##
+
 os_release_set() {
     if grep -q "^${1}=" "${OS_RELEASE}"; then
         sed -i "s|^${1}=.*|${1}=${2}|" "${OS_RELEASE}"
@@ -677,7 +732,7 @@ os_release_set() {
         printf '%s=%s\n' "${1}" "${2}" >> "${OS_RELEASE}"
     fi
 }
-##
+
 ## A Fedora base's VERSION reads "44.20260819.0 (COSMIC Atomic)": keep the build
 ## number, drop its edition label. Read the values through a subshell so the
 ## sourced variables do not leak into the rest of this script.
@@ -686,11 +741,12 @@ os_release_set() {
 ## base that does not set one of these would otherwise abort here with
 ## "VERSION: unbound variable" - and the VERSION_ID fallback on the next line,
 ## which exists for exactly that base, would never be reached.
+
 OS_NAME="$(. "${OS_RELEASE}"; printf '%s' "${NAME:-}")"
 OS_BUILD="$(. "${OS_RELEASE}"; printf '%s' "${VERSION:-}")"
 OS_BUILD="${OS_BUILD%% *}"
 [ -n "${OS_BUILD}" ] || OS_BUILD="$(. "${OS_RELEASE}"; printf '%s' "${VERSION_ID:-}")"
-##
+
 os_release_set VARIANT           "\"MYIMAGE Atomic\""
 os_release_set VARIANT_ID        "myimage-atomic"
 os_release_set VERSION           "\"${OS_BUILD} (MYIMAGE Atomic)\""
@@ -702,19 +758,19 @@ os_release_set SUPPORT_URL       "\"https://github.com/myorg/myimage/issues\""
 os_release_set BUG_REPORT_URL    "\"https://github.com/myorg/myimage/issues\""
 os_release_set IMAGE_ID          "myimage"
 os_release_set IMAGE_VERSION     "\"${OS_BUILD}\""
-##
+
 ## On a Fedora base, abrt uses these to file crashes against Fedora's Bugzilla.
 ## Nobody there can act on a crash in an image they did not build, so drop them.
-##
+
 sed -i '/^REDHAT_BUGZILLA_PRODUCT=/d
 /^REDHAT_BUGZILLA_PRODUCT_VERSION=/d
 /^REDHAT_SUPPORT_PRODUCT=/d
 /^REDHAT_SUPPORT_PRODUCT_VERSION=/d' "${OS_RELEASE}"
-##
+
 ## Prove the file still parses and that the edits landed. A malformed os-release
 ## breaks a great deal more than the About dialog, and an edit that quietly
 ## matched nothing is the failure mode this whole section is built to avoid.
-##
+
 ( . "${OS_RELEASE}"
   [ "${VARIANT_ID:-}" = "myimage-atomic" ] || { echo "os-release: VARIANT_ID not applied" >&2; exit 1; }
   [ "${IMAGE_ID:-}" = "myimage" ]          || { echo "os-release: IMAGE_ID not applied" >&2; exit 1; }
@@ -722,12 +778,14 @@ sed -i '/^REDHAT_BUGZILLA_PRODUCT=/d
       *"MYIMAGE Atomic"*) ;;
       *) echo "os-release: PRETTY_NAME not applied" >&2; exit 1 ;;
   esac )
-##
+
 ## NAME and the leading field of VERSION are left untouched, so the ISO name the
 ## workflow derives from them is unaffected.
 
 
-### 9b. Graphical boot ######################################################
+#############################################################################
+## 9b. Graphical boot
+#############################################################################
 ##
 ## A splash screen instead of a wall of kernel messages needs two things, and a
 ## plain bootc base has neither:
@@ -756,6 +814,7 @@ INITRAMFS="/usr/lib/modules/${KVER}/initramfs.img"
 ## only do it when the base has not already done it for us. A base whose
 ## initramfs lsinitrd cannot read (it complains about the compression on some)
 ## simply gets regenerated - the safe direction to be wrong in.
+
 if ! lsinitrd -m "${INITRAMFS}" 2>/dev/null | tr ' ' '\n' | grep -qx plymouth; then
     # --no-hostonly:  the image has to boot on any machine, not just the builder.
     # --add ostree:   the ostree module must be present or the system will not
@@ -785,6 +844,7 @@ fi
 ## And say what went wrong. As a bare assertion this failed the build with no
 ## output at all: the last thing in the log was dracut's, and nothing anywhere
 ## named plymouth.
+
 INITRAMFS_MODULES="$(lsinitrd -m "${INITRAMFS}" | tr ' ' '\n')"
 if ! grep -qx plymouth <<<"${INITRAMFS_MODULES}"; then
     echo "ERROR: the initramfs at ${INITRAMFS} carries no plymouth module," >&2
@@ -797,7 +857,9 @@ if ! grep -qx plymouth <<<"${INITRAMFS_MODULES}"; then
 fi
 
 
-### 9c. Verify our own updates ##############################################
+#############################################################################
+## 9c. Verify our own updates
+#############################################################################
 ##
 ## Signed updates are on by default, which makes a signing key a
 ## prerequisite rather than an extra: the build needs your public key at
@@ -867,11 +929,13 @@ fi
 ## because no registry is involved. scripts/set-image-name.sh keeps it
 ## current, and "set-image-name.sh --check" - run by build.yml before
 ## anything else - fails the build if it is ever left stale.
+
 POLICY_SCOPE="${IMAGE_REPO:-ghcr.io/myorg/myimage}"
 
 ## The key filename deliberately carries no project name. Nothing outside
 ## this section reads the path, so naming it after the image would only add
 ## one more literal to keep in step with a rename, for no gain.
+
 POLICY_KEY="/etc/pki/containers/signing-key.pub"
 
 install -Dm0644 "${CTX}/cosign.pub" "${POLICY_KEY}"
@@ -1015,7 +1079,9 @@ if rules[0].get("keyPath") != key or not os.path.exists(key):
 '
 
 
-### 10. Directories that must exist at boot ##################################
+#############################################################################
+## 10. Directories that must exist at boot
+#############################################################################
 ##
 ## /var is reset on every deployment, so a directory created during the build
 ## does not reach a freshly installed system - and "bootc container lint" warns
@@ -1041,17 +1107,21 @@ if rules[0].get("keyPath") != key or not os.path.exists(key):
 ## masks systemd-remount-fs to avoid. A base without geoclue would get exactly
 ## that from a statically shipped line, so write the rule here, where the
 ## build can see whether the user is actually there.
+
 if getent passwd geoclue >/dev/null 2>&1; then
     printf 'd /var/lib/geoclue 0755 geoclue geoclue - -\n' \
         > /usr/lib/tmpfiles.d/20-geoclue-var-dir.conf
 fi
 
 
-### 11. Build residue #######################################################
+#############################################################################
+## 11. Build residue
+#############################################################################
 ##
 ## /run is a tmpfs on a running system, so anything an RPM scriptlet left there
 ## during the build is dead weight in the image - and "bootc container lint"
 ## flags it. tuned's scriptlet creates /run/tuned; systemd-tmpfiles recreates it
 ## on every boot from the rule tuned itself ships, so dropping it here costs
 ## nothing.
+
 rm -rf /run/tuned
