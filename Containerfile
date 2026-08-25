@@ -46,8 +46,8 @@ COPY build_files /
 ##   almalinux-bootc   in rpm_packages, 16 do not exist there. That does not
 ##                     fail the build - section 3 records them - but expect to
 ##                     reconcile the list rather than inherit it. Both are dnf 4
-##                     rather than dnf5, which is the other path section 3 has
-##                     to get right.
+##                     where the Fedora bases are dnf5 - the same "dnf" command
+##                     either way, which is why section 3 has no version test.
 ##
 ##   bootc-os          a minimal image for virtual machines, and it shows: 20 of
 ##   (Hummingbird)     the 21 names do not arrive, and its repositories carry no

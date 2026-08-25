@@ -103,10 +103,14 @@ that is not freely redistributable. That sits badly with a template that
 publishes to a public `ghcr.io` package by default. AlmaLinux and Rocky give
 you the RHEL-compatible userland with none of it.
 
-openSUSE is **not** supported. It is RPM, but it is zypper rather than dnf, and
-there is no bootc base image to start from - the package sections of `build.sh`
-would have to be rewritten. Non-RPM bases (Debian, Ubuntu, Arch) are further
-out again, and would lose the ISO path entirely.
+openSUSE is **not** supported, and the package manager is the smaller half of
+why. `build.sh` works out which installer the base has once, at the top of
+section 3, and a zypper clause would go in that one place - the comment there
+says so. What is missing is a base: there is no openSUSE bootc image on
+`registry.opensuse.org`, `registry.suse.com` or quay, and an installer the
+template can drive is not the same thing as a base `bootc` can boot. Non-RPM
+bases (Debian, Ubuntu, Arch) are further out again, and would lose the ISO path
+entirely.
 
 ## Quick start
 

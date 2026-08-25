@@ -8,17 +8,18 @@
 #
 # Two questions, and they fail differently:
 #
-#   the rpm_packages list   Installed with the same flags section 3 uses. This
-#                           must not fail on any base, on any of them, ever:
-#                           the whole point of --skip-unavailable and
-#                           --skip-broken is that a package list cannot break a
-#                           build. Those flags were not always right. Project
-#                           Hummingbird carries NetworkManager-tui with a
-#                           dependency nothing in its repositories provides,
-#                           which stopped the build on Fedora while CentOS
-#                           shrugged - dnf 4's strict=0 covers in one setting
-#                           what dnf5 splits into two flags, and only one of
-#                           them was being passed.
+#   the rpm_packages list   Installed with the same flag section 3 uses. This
+#                           must not fail on any base, ever: the whole point of
+#                           strict=0 is that a package list cannot break a
+#                           build. It has not always held. Project Hummingbird
+#                           carries NetworkManager-tui with a dependency
+#                           nothing in its repositories provides, which stopped
+#                           the build on Fedora while CentOS shrugged, back
+#                           when the two dnf versions were driven by separate
+#                           flags that had drifted apart. They are one
+#                           invocation now, and this is what keeps the flag
+#                           honest: dnf5 honours strict, and would exit 2 if a
+#                           release ever stopped.
 #
 #   the six by name         What sections 8 and 9b install with pkg_install,
 #                           which has no skip flags and stops the build. A base
@@ -83,26 +84,21 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
-      # This workflow repeats the dnf flags build.sh uses, because it runs them
-      # against a bare base rather than through build.sh. Two copies of the same
-      # thing drift, so the copy is checked rather than trusted: change the
-      # flags in build.sh and this fails here, pointing at the line to update,
-      # instead of quietly testing something the build no longer does.
-      - name: The flags below still match build.sh
+      # This workflow repeats the dnf commands build.sh uses, because it runs
+      # them against a bare base rather than through build.sh. Two copies of the
+      # same thing drift, so the copy is checked rather than trusted: change
+      # section 3 and this fails here, naming the line to update, instead of
+      # quietly testing something the build no longer does.
+      - name: The commands below still match build.sh
         run: |
           set -euo pipefail
-          ok=1
-          grep -q -- 'dnf5 install --skip-unavailable --skip-broken -y' \
-            build_files/build.sh || ok=0
-          grep -q -- 'dnf install --setopt=strict=0 -y' \
-            build_files/build.sh || ok=0
-          if [ "${ok}" -eq 0 ]; then
-            echo "build_files/build.sh no longer installs with the flags this" >&2
-            echo "workflow checks. Update the dnf lines in the two steps below" >&2
-            echo "to match section 3, then rerun." >&2
+          if ! grep -q -- 'dnf install --setopt=strict=0 -y' build_files/build.sh; then
+            echo "build_files/build.sh no longer installs the package list with" >&2
+            echo "\"dnf install --setopt=strict=0 -y\". Update the two steps" >&2
+            echo "below to match section 3, then rerun." >&2
             exit 1
           fi
-          echo "flags match section 3 of build.sh"
+          echo "commands match section 3 of build.sh"
 
       # The package list. Failing here means a base can break a build through
       # rpm_packages alone, which the skip flags exist to make impossible.
@@ -117,11 +113,7 @@ jobs:
               set -euo pipefail
               PACKAGES=$({ grep -vE "^\s*(#|$)" /rpm_packages || true; } | tr "\n" " ")
               [ -n "${PACKAGES}" ] || { echo "rpm_packages is empty - nothing to check"; exit 0; }
-              if command -v dnf5 >/dev/null 2>&1; then
-                dnf5 install --skip-unavailable --skip-broken -y ${PACKAGES}
-              else
-                dnf install --setopt=strict=0 -y ${PACKAGES}
-              fi
+              dnf install --setopt=strict=0 -y ${PACKAGES}
               echo
               echo "asked for $(wc -w <<<"${PACKAGES}") names; these did not arrive:"
               # "|| true" for the same reason section 3 has it: whatprovides
@@ -146,11 +138,7 @@ jobs:
           rc=0
           podman run --rm "${BASE}" bash -c "
             set -euo pipefail
-            if command -v dnf5 >/dev/null 2>&1; then
-              dnf5 install -y ${NAMED}
-            else
-              dnf install -y ${NAMED}
-            fi
+            dnf install -y ${NAMED}
           " > "${RUNNER_TEMP}/named.log" 2>&1 || rc=$?
 
           {

@@ -252,35 +252,46 @@ PACKAGES=$({ grep -vE '^\s*(#|$)' "${CTX}/rpm_packages" || true; } | tr '\n' ' '
 ## "rpm -q --whatprovides" is what decides, rather than the package name alone,
 ## so a name satisfied by a virtual provide or by a renamed package still
 ## counts as installed.
-## dnf5 on Fedora, dnf on CentOS Stream, which ships dnf 4 and no dnf5 at all.
-## The flags differ too - dnf 4 has no --skip-unavailable, and its equivalent is
-## strict=0 - so swapping the binary alone is not enough. Without this the very
-## first package install dies on a base the Containerfile offers by name.
+## "dnf" is the right command on every base the Containerfile offers. It
+## resolves to /usr/bin/dnf5 on Fedora, Hummingbird and the Atomic Desktops,
+## and to /usr/bin/dnf-3 on CentOS Stream and AlmaLinux. So there is no version
+## to detect here - only a command to run, provided the flags mean the same to
+## both. They do, but not the ones you would reach for first:
 ##
-## dnf5 needs both --skip-unavailable and --skip-broken, because they are two
-## different failures and it treats them separately: a name no repository
-## carries, and a name that is carried but cannot be installed because
-## something it depends on is missing. dnf 4's strict=0 covers the pair in one
-## setting, so passing only the first here made the dnf5 path stricter than the
-## dnf 4 one it is meant to match - a base whose repository has a broken
-## dependency anywhere in the list built on CentOS and stopped on Fedora.
-## Either way the package does not arrive, and either way the record below
-## catches it: "rpm -q --whatprovides" asks what is installed, not why not.
+##   --skip-unavailable   dnf5 only; dnf 4 exits 2, "unknown option".
+##   --skip-broken        both, but on dnf5 it covers only the broken half - a
+##                        name no repository carries still fails.
+##   --setopt=strict=0    both, and on both it covers the pair: a name nothing
+##                        provides, and a name whose dependencies cannot be
+##                        met. That is what dnf 4 documents it as, and dnf5
+##                        honours it - measured, not assumed.
 ##
-## Two functions, because this file installs two kinds of package and they want
-## opposite behaviour when a name turns out to be missing:
+## So: one invocation rather than a branch per version. That is worth more than
+## tidiness. This was two branches written to be equivalent, and they were not
+## - the dnf5 side passed --skip-unavailable alone, so a repository carrying a
+## package with an unmeetable dependency built on CentOS and stopped on Fedora.
+## Two things that must agree eventually do not; one thing cannot disagree with
+## itself.
 ##
-##   pkg_install_optional   the rpm_packages list. A missing name is recorded
-##                          and the build carries on, as described above.
-##   pkg_install            a package a later section needs by name. A missing
-##                          one stops the build there and then, where the
-##                          package is named - not three sections later, where
-##                          only a systemd unit is.
+## The risk traded for that is dnf5 someday dropping strict. It fails loudly if
+## it does: an unrecognised --setopt is exit 2 on dnf5. And base-check.yml runs
+## this exact flag against every base weekly, so it would show up there first.
 ##
-## Both are safe to call for something the base already has: dnf says it is
-## installed and exits 0.
-##
-## Both also clean up after themselves. dnf leaves repo metadata under
+## A zypper clause would go in the refusal below, and openSUSE is RPM so the
+## record further down would still work. It is absent on purpose: there is no
+## openSUSE bootc base image to point it at - not on registry.opensuse.org,
+## registry.suse.com or quay - and an installer this template can drive is not
+## the same thing as a base bootc can boot. A branch nothing can run is a
+## branch nothing can test, which is how it would come to be wrong quietly.
+if ! command -v dnf >/dev/null 2>&1; then
+    echo "ERROR: this base has no dnf, so nothing here can install a package." >&2
+    echo "Every base the Containerfile offers has one - on Fedora it is dnf5" >&2
+    echo "under that name. If you changed the base, check that it is an RPM" >&2
+    echo "one; the list of what is known to work is at the top of that file." >&2
+    exit 1
+fi
+
+## Both installers clean up after themselves. dnf leaves repo metadata under
 ## /var/lib/dnf and lock files under /run, both of which land in the image and
 ## both of which "bootc container lint" flags - as "content in runtime-only
 ## directories" and "content in /var missing systemd tmpfiles.d entries". That
@@ -292,21 +303,19 @@ pkg_cleanup() {
     rm -rf /var/lib/dnf /run/dnf
 }
 
+## The rpm_packages list: a name that cannot be installed is recorded and the
+## build carries on.
 pkg_install_optional() {
-    if command -v dnf5 >/dev/null 2>&1; then
-        dnf5 install --skip-unavailable --skip-broken -y "$@"
-    else
-        dnf install --setopt=strict=0 -y "$@"
-    fi
+    dnf install --setopt=strict=0 -y "$@"
     pkg_cleanup
 }
 
+## A package a later section needs by name: no skip flag, so a missing one
+## stops the build where the package is named, rather than three sections later
+## where only a systemd unit is. Safe to call for something the base already
+## has - dnf says so and exits 0.
 pkg_install() {
-    if command -v dnf5 >/dev/null 2>&1; then
-        dnf5 install -y "$@"
-    else
-        dnf install -y "$@"
-    fi
+    dnf install -y "$@"
     pkg_cleanup
 }
 
