@@ -93,9 +93,15 @@ Fedora and CentOS and nowhere else. Container and disk images are not affected.
 | `quay.io/fedora-ostree-desktops/*` - `silverblue`, `kinoite`, `cosmic-atomic`, `sway-atomic`, `xfce-atomic`, `budgie-atomic`, `lxqt-atomic`, `base-atomic` | the default (`silverblue`); built and tested |
 | `quay.io/fedora/fedora-bootc` | built and tested |
 | `quay.io/centos-bootc/centos-bootc` | built and tested. Its repositories carry a different package set - 16 of the 21 names in `rpm_packages` do not exist there - so expect to reconcile that list rather than inherit it |
-| Red Hat's `rhel-bootc` images | not tested here. Same family (dnf, rpm, dracut), so it should work, but pulling the base needs a subscription and its repositories need entitlement inside the build - two separate credentials. The `Containerfile` carries the mechanics, commented out |
 | AlmaLinux / Rocky bootc images | not tested here. CentOS Stream rebuilds, so expect them to behave like it |
 | `quay.io/hummingbird-community/bootc-os` - Red Hat's Project Hummingbird, itself experimental | built and tested here, after trimming. The machinery is all there (Fedora-derived, `dnf5`, `rpm`, `dracut`, and `policy.json` already at the `/usr/share` location), but 20 of the 21 names in `rpm_packages` do not arrive, and its repositories carry no `tuned`, `crontabs`, `cronie-anacron` or `plymouth` either - so section 8's `pkg_install` stops until you drop those, and section 9b has nothing to install. Trimmed to that it builds and lints clean. Disk images build; ISOs do not - `bootc-image-builder` has no distro definition for it |
+
+Red Hat's `rhel-bootc` images are left out on purpose. They would work - same
+dnf, rpm and dracut - but they need a subscription to pull and an entitlement
+certificate to install from, and an image layered on one carries RHEL content
+that is not freely redistributable. That sits badly with a template that
+publishes to a public `ghcr.io` package by default. AlmaLinux and Rocky give
+you the RHEL-compatible userland with none of it.
 
 openSUSE is **not** supported. It is RPM, but it is zypper rather than dnf, and
 there is no bootc base image to start from - the package sections of `build.sh`

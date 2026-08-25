@@ -33,7 +33,6 @@ COPY build_files /
 ##   quay.io/fedora/fedora-bootc:44                      Fedora
 ##   quay.io/centos-bootc/centos-bootc:stream10          CentOS Stream
 ##   quay.io/hummingbird-community/bootc-os:latest       Project Hummingbird
-##   registry.redhat.io/rhel10/rhel-bootc:latest         RHEL - see "Subscription" below
 ##
 ## The further you go from the desktop bases, the less the defaults here can
 ## assume. Three cases, measured rather than guessed:
@@ -58,37 +57,16 @@ COPY build_files /
 ##                     bootc-image-builder has no Anaconda definition for it
 ##                     ("could not find def file for distro hummingbird-..."),
 ##                     though disk images build normally.
-FROM quay.io/fedora-ostree-desktops/silverblue:44
+##
+## Deliberately absent: Red Hat's rhel-bootc images. They would work - same
+## dnf, rpm and dracut - but they need a subscription to pull and an entitlement
+## certificate to install from, and an image layered on one carries RHEL content
+## that is not freely redistributable. That sits badly with a template whose
+## whole shape is "push to a public ghcr.io package and let machines upgrade
+## from it". AlmaLinux and Rocky are the RHEL-compatible route with none of
+## that: free to pull, free to publish.
 
-## Subscription: the RHEL bases, and only those, need credentials - two of them,
-## for two different things, and having one does not get you the other.
-##
-##   1. To PULL the base. registry.redhat.io refuses anonymous requests, so
-##      "podman build" fails before it starts. It answers 401 rather than 404,
-##      so a missing login and a mistyped image name do at least look different.
-##      Log in once on your own machine:
-##
-##          podman login registry.redhat.io
-##
-##      For CI, make a service account at access.redhat.com (Service Accounts),
-##      keep its token as a repository secret, and log in the same way in a step
-##      before the build. Both scripts/build.sh and the workflow shell out to
-##      podman, so they pick up an existing login with no further argument.
-##
-##   2. To INSTALL from RHEL repositories while the build runs. That needs an
-##      entitlement certificate, which the pull credential is not. On a
-##      subscribed RHEL host podman mounts the host's entitlements into the
-##      build by itself and there is nothing to do. Anywhere else - a Fedora
-##      laptop, a GitHub runner - hand them in:
-##
-##          podman build --secret id=entitlement,src=/etc/pki/entitlement/NNN.pem \
-##                       --secret id=entitlement-key,src=/etc/pki/entitlement/NNN-key.pem ...
-##
-##      and uncomment the two mounts in the RUN below, which put them where dnf
-##      looks for them.
-##
-## Not exercised here: every base above it is built and tested on is public.
-## Treat this half as the shape of the answer rather than a recipe known to run.
+FROM quay.io/fedora-ostree-desktops/silverblue:44
 
 ## The repository this image gets published to, passed in by the workflow.
 ## build.sh section 9c checks the scope of the signature policy it writes
@@ -106,9 +84,6 @@ RUN --mount=type=bind,from=ctx,source=/,target=/ctx \
     --mount=type=cache,dst=/var/cache \
     --mount=type=cache,dst=/var/log \
     --mount=type=tmpfs,dst=/tmp \
-    # RHEL entitlement, off by default - see "Subscription" above.
-    # --mount=type=secret,id=entitlement,target=/etc/pki/entitlement/client.pem \
-    # --mount=type=secret,id=entitlement-key,target=/etc/pki/entitlement/client-key.pem \
     /ctx/build.sh
 
 ## Sanity check: fails the build if the image is not a valid bootable container.
