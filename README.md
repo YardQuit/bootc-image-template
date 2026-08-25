@@ -93,7 +93,7 @@ Fedora and CentOS and nowhere else. Container and disk images are not affected.
 | `quay.io/fedora-ostree-desktops/*` - `silverblue`, `kinoite`, `cosmic-atomic`, `sway-atomic`, `xfce-atomic`, `budgie-atomic`, `lxqt-atomic`, `base-atomic` | the default (`silverblue`); built and tested |
 | `quay.io/fedora/fedora-bootc` | built and tested |
 | `quay.io/centos-bootc/centos-bootc` | built and tested. Its repositories carry a different package set - 16 of the 21 names in `rpm_packages` do not exist there - so expect to reconcile that list rather than inherit it |
-| AlmaLinux / Rocky bootc images | not tested here. CentOS Stream rebuilds, so expect them to behave like it |
+| `quay.io/almalinuxorg/almalinux-bootc:10` | built and tested. Behaves like CentOS Stream, down to the same 16 of 21 missing - it is dnf 4 too. Rocky publishes no bootc image that could be found, on quay or Docker Hub, so it is not listed |
 | `quay.io/hummingbird-community/bootc-os` - Red Hat's Project Hummingbird, itself experimental | built and tested here, after trimming. The machinery is all there (Fedora-derived, `dnf5`, `rpm`, `dracut`, and `policy.json` already at the `/usr/share` location), but 20 of the 21 names in `rpm_packages` do not arrive, and its repositories carry no `tuned`, `crontabs`, `cronie-anacron` or `plymouth` either - so section 8's `pkg_install` stops until you drop those, and section 9b has nothing to install. Trimmed to that it builds and lints clean. Disk images build; ISOs do not - `bootc-image-builder` has no distro definition for it |
 
 Red Hat's `rhel-bootc` images are left out on purpose. They would work - same
@@ -201,6 +201,7 @@ rides the newest, so it can never be pruned away. Change
 | `.github/workflows/build.yml` | Builds and publishes the container image, and prunes old versions. |
 | `.github/workflows/build-disk.yml` | Builds the installer ISO on demand. |
 | `.github/workflows/checks.yml` | ShellCheck, the rename tests, and a parse of every YAML and TOML file. |
+| `.github/workflows/base-check.yml` | Weekly: can the other bases still install what `build.sh` asks for? |
 | `.github/dependabot.yml` | Keeps the actions the workflows use up to date. The base image is left to you. |
 | `LICENSE` | MIT. Replace the copyright line with your own name if you build on this. |
 
@@ -397,6 +398,22 @@ shellcheck --severity=warning --exclude=SC1090 \
 `.github/workflows/checks.yml` runs all of them on every push and pull request,
 along with a parse of every YAML and TOML file in the repository. It needs no
 registry and no signing key, so unlike the image build it never skips.
+
+`.github/workflows/base-check.yml` asks a different question, weekly and on
+demand: can each base the `Containerfile` offers still install what `build.sh`
+asks for? It builds nothing - it runs the package list and the six packages
+sections 8 and 9b install by name against each base in a throwaway container,
+which takes a minute or two rather than ten. The failure it exists to catch is
+not a change here but a change *there*: a base that drops or renames a package
+breaks a build that worked yesterday, and nothing in this repository would
+otherwise notice until you pushed. The one base that is *expected* to fall
+short - Project Hummingbird, which carries none of the six - is reported rather
+than failed, which is also how the missing `--skip-broken` was found: its
+repositories hold a package with a dependency nothing provides, and that is a
+shape no other base here produces.
+
+Delete it along with `tests/` if you have settled on one base; nothing else
+refers to it.
 
 The rename tests run twice: once against the repository as it stands, and once
 against a copy renamed to something else. That second pass is how they run for
