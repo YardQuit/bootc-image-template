@@ -253,9 +253,19 @@ PACKAGES=$({ grep -vE '^\s*(#|$)' "${CTX}/rpm_packages" || true; } | tr '\n' ' '
 ## so a name satisfied by a virtual provide or by a renamed package still
 ## counts as installed.
 ## dnf5 on Fedora, dnf on CentOS Stream, which ships dnf 4 and no dnf5 at all.
-## The flag differs too - dnf 4 has no --skip-unavailable, and its equivalent is
+## The flags differ too - dnf 4 has no --skip-unavailable, and its equivalent is
 ## strict=0 - so swapping the binary alone is not enough. Without this the very
 ## first package install dies on a base the Containerfile offers by name.
+##
+## dnf5 needs both --skip-unavailable and --skip-broken, because they are two
+## different failures and it treats them separately: a name no repository
+## carries, and a name that is carried but cannot be installed because
+## something it depends on is missing. dnf 4's strict=0 covers the pair in one
+## setting, so passing only the first here made the dnf5 path stricter than the
+## dnf 4 one it is meant to match - a base whose repository has a broken
+## dependency anywhere in the list built on CentOS and stopped on Fedora.
+## Either way the package does not arrive, and either way the record below
+## catches it: "rpm -q --whatprovides" asks what is installed, not why not.
 ##
 ## Two functions, because this file installs two kinds of package and they want
 ## opposite behaviour when a name turns out to be missing:
@@ -284,7 +294,7 @@ pkg_cleanup() {
 
 pkg_install_optional() {
     if command -v dnf5 >/dev/null 2>&1; then
-        dnf5 install --skip-unavailable -y "$@"
+        dnf5 install --skip-unavailable --skip-broken -y "$@"
     else
         dnf install --setopt=strict=0 -y "$@"
     fi
@@ -313,7 +323,7 @@ rpm -q --whatprovides ${PACKAGES} 2>&1 \
 chmod 0644 /usr/share/image-build/skipped-packages
 
 if [ -s /usr/share/image-build/skipped-packages ]; then
-    echo "### PACKAGES NOT INSTALLED - the repos provide none of these:"
+    echo "### PACKAGES NOT INSTALLED - not in the repos, or not installable:"
     sed 's/^/###   /' /usr/share/image-build/skipped-packages
     echo "### Recorded in the image at /usr/share/image-build/skipped-packages"
 fi
