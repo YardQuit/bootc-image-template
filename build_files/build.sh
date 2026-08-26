@@ -491,9 +491,10 @@ rm -f /etc/skel/.emacs
 ##
 ## They are written for a running machine, so they default to a per-user
 ## directory - $HOME/.local/bin most often, sometimes /usr/local/bin or /opt.
-## On every base above, /root and /home are symlinks into /var; on the Fedora
-## Atomic desktops and Hummingbird, /usr/local and /opt are too. What that does
-## to a build depends on the base, which is the awkward part:
+## On every base the Containerfile offers, /root and /home are symlinks into
+## /var; on the Fedora Atomic desktops and Hummingbird, /usr/local and /opt are
+## too. What that does to a build depends on the base, which is the awkward
+## part:
 ##
 ##   Where the target does not exist in the base image - the desktops,
 ##   fedora-bootc, AlmaLinux - "mkdir -p" can neither follow the dangling link
