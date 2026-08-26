@@ -74,8 +74,9 @@ stands, and every default below is a plain, commented line in
   has one.
 
 Commented examples, off by default, cover packages that install into `/opt`
-(1Password, MEGAsync), COPR repos, third-party repos, requiring a YubiKey for
-`sudo`, and changing the firewalld default zone.
+(1Password, MEGAsync), COPR repos, third-party repos, upstream `curl | sh`
+installers, requiring a YubiKey for `sudo`, and changing the firewalld default
+zone.
 
 ## What you need
 
