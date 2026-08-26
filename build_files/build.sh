@@ -552,6 +552,25 @@ rm -f /etc/skel/.emacs
 
 ## Sections 2a and 2b are complete, ready-to-uncomment examples of this
 ## (1Password and MEGAsync).
+##
+## Both of those import the vendor's key first, so rpm checks the signature
+## before installing. Not every project signs its packages, and dnf says so
+## rather than refusing:
+##
+##   Warning: skipped OpenPGP checks for 1 package from repository: @commandline
+##
+## That is worth reading rather than tuning out: it means nothing vouches for
+## the file except HTTPS to the host it came from. The block below is one of
+## those - there is no key to import, so there is no line importing one.
+##
+## Its URL carries the tag "rpm-release" rather than a version, so the address
+## is fixed and the file behind it moves. Each build takes whatever is current,
+## the same way section 6's installers do.
+
+# --- CSVDT from a GitHub release: uncomment every line down to the next ruler
+# --------------------------------------------------------------------------
+# dnf -y install https://github.com/YardQuit/csvdt/releases/download/rpm-release/csvdt.x86_64.rpm
+# --------------------------------------------------------------------------
 
 
 #############################################################################
