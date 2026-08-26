@@ -730,9 +730,20 @@ systemctl mask systemd-remount-fs.service
 
 # --- Tailscale: uncomment every line down to the next ruler
 # --------------------------------------------------------------------------
-# pkg_install tailscale trayscale
+# pkg_install tailscale
 # systemctl enable tailscaled.service
-#
+# --------------------------------------------------------------------------
+
+# ## Trayscale is the tray icon for the daemon above, and it is a GTK4
+# ## application: on a base with no desktop it drags in GTK and Mesa for about
+# ## 840 MB - measured on quay.io/fedora/fedora-bootc:44, where tailscale alone
+# ## costs 49 MB - and then never runs, because a base with no session never
+# ## reads /etc/xdg/autostart. That is why it is a block of its own rather than a
+# ## line in the one above. Leave it commented on a server.
+
+# --- Trayscale, the tray icon for it - desktop bases only
+# --------------------------------------------------------------------------
+# pkg_install trayscale
 # ## Trayscale is a tray icon, so it belongs to a desktop session rather than to
 # ## systemd - "systemctl enable" has nothing to enable. A session reads
 # ## /etc/xdg/autostart, which is the system-wide half of ~/.config/autostart and
