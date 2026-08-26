@@ -288,6 +288,23 @@ echo "${DONKEY_SHA256}  /etc/skel/.config/emacs/donkey/donkey.el" | sha256sum -c
 #
 # ## As with 1Password: a dnf repository for auto-updates, of no use in an image.
 # rm -f /etc/yum.repos.d/megasync.repo
+#
+# ## MEGAsync writes its own ~/.config/autostart entry the first time it is run
+# ## and told to start on login. This one is here so that it does not have to be:
+# ## a fresh account gets the tray client running without anyone opening the
+# ## preferences window first. The same /etc/xdg/autostart reasoning as the
+# ## Tailscale block in section 8, including how to switch it off per account.
+# install -d -m 0755 /etc/xdg/autostart
+# cat > /etc/xdg/autostart/megasync.desktop <<'DESKTOP'
+# [Desktop Entry]
+# Type=Application
+# Name=MEGAsync
+# Icon=mega
+# Exec=sh -c "sleep 5; exec megasync 2>/dev/null"
+# Terminal=false
+# X-GNOME-Autostart-enabled=true
+# DESKTOP
+# chmod 0644 /etc/xdg/autostart/megasync.desktop
 # --------------------------------------------------------------------------
 
 ## The inotify limit belongs in a sysctl.d drop-in applied at boot instead, e.g.
@@ -713,8 +730,33 @@ systemctl mask systemd-remount-fs.service
 
 # --- Tailscale: uncomment every line down to the next ruler
 # --------------------------------------------------------------------------
-# pkg_install tailscale
+# pkg_install tailscale trayscale
 # systemctl enable tailscaled.service
+#
+# ## Trayscale is a tray icon, so it belongs to a desktop session rather than to
+# ## systemd - "systemctl enable" has nothing to enable. A session reads
+# ## /etc/xdg/autostart, which is the system-wide half of ~/.config/autostart and
+# ## the only half a build can write: /home is a symlink into /var and is empty
+# ## here, so there is no user directory to put anything in yet.
+# ##
+# ## /etc/skel would be the other option and is not used, because it only seeds
+# ## accounts created after the image is installed. On a machine that upgrades in
+# ## place, the accounts that matter already exist and would never see it.
+# ##
+# ## To switch it off for one account rather than for the image, drop a file of
+# ## the same name into ~/.config/autostart containing "Hidden=true" - a user
+# ## entry shadows the system one.
+# install -d -m 0755 /etc/xdg/autostart
+# cat > /etc/xdg/autostart/trayscale.desktop <<'DESKTOP'
+# [Desktop Entry]
+# Type=Application
+# Name=Trayscale
+# Icon=dev.deedles.Trayscale
+# Exec=sh -c "sleep 5; exec trayscale --hide-window 2>/dev/null"
+# Terminal=false
+# X-GNOME-Autostart-enabled=true
+# DESKTOP
+# chmod 0644 /etc/xdg/autostart/trayscale.desktop
 # --------------------------------------------------------------------------
 
 # systemctl --global enable some-user-unit.service   # for every user session
