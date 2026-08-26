@@ -207,6 +207,24 @@ echo "${DONKEY_SHA256}  /etc/skel/.config/emacs/donkey/donkey.el" | sha256sum -c
 # ## updates when you rebuild it, so the file has no purpose here.
 
 # rm -f /etc/yum.repos.d/1password.repo
+#
+# ## 1Password writes its own ~/.config/autostart entry when "Start at login" is
+# ## turned on in its settings. This one is here so that it does not have to be.
+# ## --silent is the app's own flag - its CLI defines it as "open to the system
+# ## tray without showing the main window" - and the path is the one the package's
+# ## own .desktop uses. Same /etc/xdg/autostart reasoning as the MEGAsync and
+# ## Trayscale blocks.
+# install -d -m 0755 /etc/xdg/autostart
+# cat > /etc/xdg/autostart/1password.desktop <<'DESKTOP'
+# [Desktop Entry]
+# Type=Application
+# Name=1Password
+# Icon=1password
+# Exec=sh -c "sleep 5; exec /opt/1Password/1password --silent 2>/dev/null"
+# Terminal=false
+# X-GNOME-Autostart-enabled=true
+# DESKTOP
+# chmod 0644 /etc/xdg/autostart/1password.desktop
 # --------------------------------------------------------------------------
 
 ## Two things the package's install step does that are worth knowing about:
