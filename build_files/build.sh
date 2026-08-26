@@ -126,7 +126,7 @@ echo "${DONKEY_SHA256}  /etc/skel/.config/emacs/donkey/donkey.el" | sha256sum -c
 
 # --- an /opt package that writes inside its own directory
 # --------------------------------------------------------------------------
-# dnf5 -y install examplepkg
+# dnf -y install examplepkg
 # mv /opt/examplepkg/logs /var/log/examplepkg
 # ln -sr /var/log/examplepkg /opt/examplepkg/logs
 # --------------------------------------------------------------------------
@@ -201,7 +201,7 @@ echo "${DONKEY_SHA256}  /etc/skel/.config/emacs/donkey/donkey.el" | sha256sum -c
 # groupadd -r onepassword-mcp
 
 # rpm --import https://downloads.1password.com/linux/keys/1password.asc
-# dnf5 -y install https://downloads.1password.com/linux/rpm/stable/x86_64/1password-latest.rpm
+# dnf -y install https://downloads.1password.com/linux/rpm/stable/x86_64/1password-latest.rpm
 
 # ## The package drops in a dnf repository for its own auto-updates. An image
 # ## updates when you rebuild it, so the file has no purpose here.
@@ -267,7 +267,7 @@ echo "${DONKEY_SHA256}  /etc/skel/.config/emacs/donkey/donkey.el" | sha256sum -c
 ## not where it looks and the import fails. It then calls sysctl to raise
 ## fs.inotify.max_user_watches, which is denied in an unprivileged build.
 ##
-## rpm still installs the package when %post fails, but dnf5 reports the whole
+## rpm still installs the package when %post fails, but dnf reports the whole
 ## transaction as failed and exits non-zero, which would abort the build. So
 ## tolerate a non-zero exit and assert afterwards that the package really landed
 ## - a genuine download or dependency failure still stops the build. The same
@@ -282,8 +282,8 @@ echo "${DONKEY_SHA256}  /etc/skel/.config/emacs/donkey/donkey.el" | sha256sum -c
 #     mkdir /opt
 # fi
 #
-# dnf5 -y install https://mega.nz/linux/repo/Fedora_44/x86_64/megasync-Fedora_44.x86_64.rpm \
-#     || echo "megasync: dnf5 exited non-zero (expected) - verifying"
+# dnf -y install https://mega.nz/linux/repo/Fedora_44/x86_64/megasync-Fedora_44.x86_64.rpm \
+#     || echo "megasync: dnf exited non-zero (expected) - verifying"
 # rpm -q megasync
 #
 # ## As with 1Password: a dnf repository for auto-updates, of no use in an image.
@@ -299,7 +299,7 @@ echo "${DONKEY_SHA256}  /etc/skel/.config/emacs/donkey/donkey.el" | sha256sum -c
 
 # --- MEGAcmd, the command line client, instead of or as well as the above
 # --------------------------------------------------------------------------
-# dnf5 -y install https://mega.nz/linux/repo/Fedora_44/x86_64/megacmd-Fedora_44.x86_64.rpm
+# dnf -y install https://mega.nz/linux/repo/Fedora_44/x86_64/megacmd-Fedora_44.x86_64.rpm
 # --------------------------------------------------------------------------
 
 ## Note that MEGAsync is a Qt5 application. On a GNOME or COSMIC image the Qt5
@@ -371,6 +371,13 @@ PACKAGES=$({ grep -vE '^\s*(#|$)' "${CTX}/rpm_packages" || true; } | tr '\n' ' '
 ## The risk traded for that is dnf5 someday dropping strict. It fails loudly if
 ## it does: an unrecognised --setopt is exit 2 on dnf5. And base-check.yml runs
 ## this exact flag against every base weekly, so it would show up there first.
+##
+## Everything below is spelled "dnf" for the same reason, and it matters more
+## there than here: dnf5 is not installed on CentOS Stream or AlmaLinux and is
+## not in their repositories either, so a line spelled "dnf5" is not a package
+## that fails to install - it is "command not found" before dnf is reached at
+## all. Two of them need more than the name changing, and say so where they
+## are: the group example above, and the repository file in section 6.
 ##
 ## A zypper clause would go in the refusal below, and openSUSE is RPM so the
 ## record further down would still work. It is absent on purpose: there is no
@@ -446,7 +453,7 @@ fi
 rm -f /etc/skel/.emacs
 
 ## Example: install a whole package group instead of single packages
-## dnf5 group install --skip-unavailable -y cosmic-desktop
+## dnf group install --setopt=strict=0 -y cosmic-desktop
 
 
 #############################################################################
@@ -455,12 +462,32 @@ rm -f /etc/skel/.emacs
 ##
 ## Enable the repo, install, then disable it again so the finished image does
 ## not keep pulling from it at runtime.
+##
+## The setopt makes an outage say so. "copr enable" writes
+## skip_if_unavailable=True into the repo file it generates, so when COPR
+## cannot be reached dnf quietly drops the repository, prints "Repositories
+## loaded" and then stops on
+##
+##   No match for argument: starship
+##
+## which reads as "upstream removed the package" when it means "the server was
+## down for a minute". With it off you get the true reason instead:
+##
+##   Failed to download metadata ... for repository "copr:...:atim:starship"
+##
+## The build stops either way - these install by name, with no skip flag, and
+## that is deliberate. What changes is whether the log sends you hunting for a
+## renamed package or tells you to run it again.
+##
+## The glob keeps this to COPR repos. Fedora's own are already
+## skip_if_unavailable=False; the ones that are not - openh264,
+## updates-archive - are optional and meant to be skipped.
 
 # --- starship from COPR: uncomment every line down to the next ruler
 # --------------------------------------------------------------------------
-# dnf5 -y copr enable atim/starship
-# dnf5 -y install starship
-# dnf5 -y copr disable atim/starship
+# dnf -y copr enable atim/starship
+# dnf -y install --setopt="copr:*.skip_if_unavailable=0" starship
+# dnf -y copr disable atim/starship
 # --------------------------------------------------------------------------
 
 
@@ -468,9 +495,9 @@ rm -f /etc/skel/.emacs
 ## 5. Optional: RPMs from a URL
 #############################################################################
 ##
-## dnf5 can install straight from a URL - no need to download first, and no
+## dnf can install straight from a URL - no need to download first, and no
 ## repository on the finished system.
-## dnf5 -y install https://example.com/downloads/some-package.x86_64.rpm
+## dnf -y install https://example.com/downloads/some-package.x86_64.rpm
 
 ## Sections 2a and 2b are complete, ready-to-uncomment examples of this
 ## (1Password and MEGAsync).
@@ -480,10 +507,18 @@ rm -f /etc/skel/.emacs
 ## 6. Optional: third-party repos and upstream installers
 #############################################################################
 
+##
+## A repository file is fetched with curl rather than "dnf config-manager",
+## because that is the one command the two dnf versions spell differently:
+## "config-manager addrepo --from-repofile=URL" on dnf5, "config-manager
+## --add-repo URL" on dnf 4, and each rejects the other's. A .repo file is only
+## a file, so writing it where dnf looks works the same on every base, and
+## needs no plugin package installed to do it.
+
 # --- a third-party repo: uncomment every line down to the next ruler
 # --------------------------------------------------------------------------
-# dnf5 config-manager addrepo --from-repofile=https://example.com/example.repo
-# dnf5 -y install example-package
+# curl -fsSL -o /etc/yum.repos.d/example.repo https://example.com/example.repo
+# dnf -y install example-package
 # --------------------------------------------------------------------------
 
 ## An upstream "curl | sh" installer needs one thing said to it: where to put
