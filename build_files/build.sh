@@ -576,7 +576,6 @@ rm -f /etc/skel/.emacs
 #############################################################################
 ## 6. Optional: third-party repos and upstream installers
 #############################################################################
-
 ##
 ## A repository file is fetched with curl rather than "dnf config-manager",
 ## because that is the one command the two dnf versions spell differently:
