@@ -489,22 +489,24 @@ rm -f /etc/skel/.emacs
 ## has run.
 ##
 ## And the project has to have built for your base. "copr enable" writes a
-## repository URL ending in the chroot it picked - fedora-44-$basearch on
-## Fedora, epel-10-$basearch on the RHEL-family bases - so a project that only
-## builds for one of them leaves the other pointing at nothing. atim/starship
-## builds for both; many do not.
+## repository URL ending in the chroot it picked - fedora-$releasever-$basearch
+## on Fedora, epel-10-$basearch on the RHEL-family bases, which pin the number -
+## so a project that only builds for one of them leaves the other pointing at
+## nothing. atim/lazygit builds for both; many do not.
 ##
 ## The setopt makes an outage say so. "copr enable" writes
 ## skip_if_unavailable=True into the repo file it generates, so when COPR
 ## cannot be reached dnf quietly drops the repository, prints "Repositories
 ## loaded" and then stops on
 ##
-##   No match for argument: starship
+##   No match for argument: lazygit
 ##
 ## which reads as "upstream removed the package" when it means "the server was
-## down for a minute". With it off you get the true reason instead:
+## down for a minute". That is not hypothetical - it is how a build here
+## failed, with the log naming the package rather than the outage. With it
+## off you get the true reason instead:
 ##
-##   Failed to download metadata ... for repository "copr:...:atim:starship"
+##   Failed to download metadata ... for repository "copr:...:atim:lazygit"
 ##
 ## The build stops either way - these install by name, with no skip flag, and
 ## that is deliberate. What changes is whether the log sends you hunting for a
@@ -514,11 +516,11 @@ rm -f /etc/skel/.emacs
 ## skip_if_unavailable=False; the ones that are not - openh264,
 ## updates-archive - are optional and meant to be skipped.
 
-# --- starship from COPR: uncomment every line down to the next ruler
+# --- lazygit from COPR: uncomment every line down to the next ruler
 # --------------------------------------------------------------------------
-# dnf -y copr enable atim/starship
-# dnf -y install --setopt="copr:*.skip_if_unavailable=0" starship
-# dnf -y copr disable atim/starship
+# dnf -y copr enable atim/lazygit
+# dnf -y install --setopt="copr:*.skip_if_unavailable=0" lazygit
+# dnf -y copr disable atim/lazygit
 # --------------------------------------------------------------------------
 
 
@@ -576,18 +578,26 @@ rm -f /etc/skel/.emacs
 ##
 ## So one line breaks the build on one base and quietly stops shipping the
 ## binary on another. Point the installer at /usr/bin and both go away - it is
-## versioned with the image, upgrades with it and rolls back with it. Most
-## installers carry an environment variable for it; read the script before
-## piping it to a shell and the name is near the top. One that offers neither
-## that nor a plain tarball you can unpack into /usr/bin yourself does not
-## belong in a build - install it from a package instead, or leave it to the
-## user to install into their own home.
+## versioned with the image, upgrades with it and rolls back with it. How you
+## say so varies - an environment variable in some, a flag in others - so read
+## the script before piping it to a shell; either way the answer is near the
+## top. One that offers neither, and no plain tarball you can unpack into
+## /usr/bin yourself, does not belong in a build: install it from a package
+## instead, or leave it to the user to install into their own home.
+##
+## The other thing a build needs from an installer is silence. Many stop to ask
+## for confirmation, and a build has no terminal to answer with - starship's
+## dies on "/dev/tty: No such device or address" and tells you to re-run with
+## --yes. Pass whatever its version of that is.
+##
+## "sh -s --" below rather than plain "sh" is what lets those arguments through
+## the pipe at all.
 ##
 ## Section 5 is the better route whenever upstream also ships an RPM.
 
-# --- an upstream installer: uncomment every line down to the next ruler
+# --- starship, from upstream's installer rather than a COPR
 # --------------------------------------------------------------------------
-# curl -fsSL https://example.com/install.sh | EXAMPLE_INSTALL_DIR=/usr/bin sh
+# curl -sS https://starship.rs/install.sh | sh -s -- --yes --bin-dir /usr/bin
 # --------------------------------------------------------------------------
 
 
