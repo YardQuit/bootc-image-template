@@ -611,11 +611,49 @@ rm -f /etc/skel/.emacs
 ## "sh -s --" below rather than plain "sh" is what lets those arguments through
 ## the pipe at all.
 ##
+##
+## Both blocks below also write the tool's shell completions. Generating them
+## here, with the binary that was just installed, is what keeps them from
+## drifting: a release that adds a subcommand ships completions that know about
+## it on the next build, and there is nothing to remember to update.
+##
+## bash, zsh and fish, and no directory to create first - those three belong to
+## the "filesystem" package rather than to zsh or fish, so they are present on
+## every base whether or not those shells are, and the completions are already
+## in place if one is added to rpm_packages later. Both tools also offer
+## powershell and elvish, and starship offers nushell; none of those has a
+## system-wide completion directory on Linux, so none is written.
+##
+## The subcommand is not spelled the same by both - "starship completions",
+## "herdr completion" - which is the usual reason a line like this fails.
 ## Section 5 is the better route whenever upstream also ships an RPM.
 
 # --- starship, from upstream's installer rather than a COPR
 # --------------------------------------------------------------------------
 # curl -sS https://starship.rs/install.sh | sh -s -- --yes --bin-dir /usr/bin
+#
+# starship completions bash > /usr/share/bash-completion/completions/starship
+# starship completions zsh  > /usr/share/zsh/site-functions/_starship
+# starship completions fish > /usr/share/fish/vendor_completions.d/starship.fish
+# chmod 0644 /usr/share/bash-completion/completions/starship \
+#            /usr/share/zsh/site-functions/_starship \
+#            /usr/share/fish/vendor_completions.d/starship.fish
+# --------------------------------------------------------------------------
+
+## herdr is the other half of the pattern: it takes an environment variable
+## where starship takes a flag, and it asks nothing, so there is no --yes to
+## pass. Between the two blocks, both shapes you will meet are covered.
+
+# --- herdr, an installer that takes an environment variable
+# --------------------------------------------------------------------------
+# curl -fsSL https://herdr.dev/install.sh | HERDR_INSTALL_DIR=/usr/bin sh
+#
+# herdr completion bash > /usr/share/bash-completion/completions/herdr
+# herdr completion zsh  > /usr/share/zsh/site-functions/_herdr
+# herdr completion fish > /usr/share/fish/vendor_completions.d/herdr.fish
+# chmod 0644 /usr/share/bash-completion/completions/herdr \
+#            /usr/share/zsh/site-functions/_herdr \
+#            /usr/share/fish/vendor_completions.d/herdr.fish
 # --------------------------------------------------------------------------
 
 
