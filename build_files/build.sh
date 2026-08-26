@@ -463,6 +463,20 @@ rm -f /etc/skel/.emacs
 ## Enable the repo, install, then disable it again so the finished image does
 ## not keep pulling from it at runtime.
 ##
+## Two things have to be true before this block works on a given base.
+##
+## "dnf copr" comes from a plugin package rather than from dnf itself. The
+## Fedora bases and CentOS Stream ship it already - dnf5-plugins on the first,
+## python3-dnf-plugins-core on the second - but AlmaLinux does not, and the
+## subcommand is simply absent there until "dnf install -y dnf-plugins-core"
+## has run.
+##
+## And the project has to have built for your base. "copr enable" writes a
+## repository URL ending in the chroot it picked - fedora-44-$basearch on
+## Fedora, epel-10-$basearch on the RHEL-family bases - so a project that only
+## builds for one of them leaves the other pointing at nothing. atim/starship
+## builds for both; many do not.
+##
 ## The setopt makes an outage say so. "copr enable" writes
 ## skip_if_unavailable=True into the repo file it generates, so when COPR
 ## cannot be reached dnf quietly drops the repository, prints "Repositories
