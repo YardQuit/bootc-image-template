@@ -408,19 +408,32 @@ if [ -n "${OLD_OWNER}" ] && overlaps "${NAME_LOWER}" "${OLD_OWNER}"; then
     exit 1
 fi
 
-# The Donkey upstream repository, as it appears in build.sh's fetch URL and
-# the README's links. The collision scan below and the substitution guard
-# further down both derive from this one value, so they cannot drift apart:
-# lines matching it are never rewritten, and therefore never count as
-# collisions either.
-DONKEY_UPSTREAM='yardquit/donkey'
+# Upstream repositories that appear in this template by name rather than as
+# image references: Donkey's donkey.el fetch in section 1 of build.sh and the
+# README's links to it, and the CSVDT release RPM in section 5's example. The
+# collision scan below and the substitution guard further down both derive
+# from this one list, so they cannot drift apart: lines matching any entry are
+# never rewritten, and therefore never count as collisions either.
+#
+# Both halves matter. Without the guard a rename rewrites the owner inside
+# these URLs and the fetch 404s. Without the scan skipping them, an owner that
+# happens to match one - "yardquit" does, and it is this template's own owner -
+# is refused outright, so the project cannot be renamed at all.
+UPSTREAM_URLS=('yardquit/donkey' 'yardquit/csvdt')
+
+# The same list as grep arguments, built once so every scan below uses it.
+UPSTREAM_GREP=()
+for upstream in "${UPSTREAM_URLS[@]}"; do
+    UPSTREAM_GREP+=(-e "${upstream}")
+done
+unset upstream
 
 # Refuse a new value that already occurs in the files this script rewrites:
 # after this rename those occurrences would be indistinguishable from image
 # references, and the next rename would rewrite them too - "emacs" would drag
 # the skel paths in build.sh with it, "donkey" the package references, and so
 # on. The scan is case-insensitive (the owner substitution is too, and the
-# README name passes cover three cases), skips the Donkey-upstream URLs that
+# README name passes cover three cases), skips the upstream URLs that
 # the substitutions below never touch, and for the image name skips
 # README.md, whose prose collisions are the documented caveat above rather
 # than build breakage. Renaming to the value already in use is a no-op, not
@@ -437,11 +450,11 @@ check_new_value() {  # $1 = "image name"|"owner"   $2 = candidate   $3 = current
     # can never be corrupted by a later rename and must not count as a
     # collision. Without this the README's own worked example - it names
     # "myorg-labs" to explain the overlap rule - would refuse an owner
-    # genuinely called that. Same reasoning as the Donkey-upstream skip below.
+    # genuinely called that. Same reasoning as the upstream-URL skip below.
     hits=""
     for file in "${scan[@]}"; do
         found=$({ guarded_view "${file}" | grep -n -i -w -F -e "${candidate}" \
-                  | grep -v -i -F -e "${DONKEY_UPSTREAM}" || true; } \
+                  | grep -v -i -F "${UPSTREAM_GREP[@]}" || true; } \
                 | sed "s#^#${file}:#")
         if [ -n "${found}" ]; then
             hits+="${found}"$'\n'
@@ -468,12 +481,14 @@ fi
 # inside the double-quoted sed scripts.
 FENCE='/^```/,/^```/'
 
-# Lines that reference the Donkey upstream repository (yardquit/donkey URLs in
-# build.sh and README.md) are not image references: rewriting the owner there
-# breaks the build-time fetch with a 404 and dead links. This address matches
-# them case-insensitively; every substitution below branches past such lines.
-# Derived from DONKEY_UPSTREAM above so guard and collision scan stay in step.
-DONKEY_GUARD="\\#${DONKEY_UPSTREAM}#I"
+# Lines that reference one of the upstream repositories above are not image
+# references: rewriting the owner there breaks the build-time fetch with a 404
+# and leaves dead links. This address matches them case-insensitively; every
+# substitution below branches past such lines. Derived from UPSTREAM_URLS so
+# guard and collision scan stay in step - BRE alternation, which is why the
+# entries must not contain "#" (the address delimiter) or "\|".
+UPSTREAM_ALT=$(printf '%s\\|' "${UPSTREAM_URLS[@]}")
+UPSTREAM_GUARD="\\#${UPSTREAM_ALT%\\|}#I"
 
 # The same for the template-literal range in README.md. Both guards are passed
 # to every substitution below, ahead of the substitution itself.
@@ -507,11 +522,11 @@ rewrite_file() {  # $1 file, $2 old image name (""=skip), $3 old owner (""=skip)
             name_pats+=(-e "${old_name^}")
         fi
         hits=$({ guarded_view "${file}" | grep -F -w "${name_pats[@]}" || true; } \
-               | { grep -v -i -F -e "${DONKEY_UPSTREAM}" || true; } | wc -l)
+               | { grep -v -i -F "${UPSTREAM_GREP[@]}" || true; } | wc -l)
     fi
     if [ -n "${old_owner}" ]; then
         hits=$(( hits + $({ guarded_view "${file}" | grep -i -F -w -e "${old_owner}" || true; } \
-                          | { grep -v -i -F -e "${DONKEY_UPSTREAM}" || true; } | wc -l) ))
+                          | { grep -v -i -F "${UPSTREAM_GREP[@]}" || true; } | wc -l) ))
     fi
 
     if [ "${hits}" -eq 0 ] || [ "${DRY_RUN}" -eq 1 ]; then
@@ -537,7 +552,7 @@ rewrite_file() {  # $1 file, $2 old image name (""=skip), $3 old owner (""=skip)
         # everywhere, which registries reject. The three passes only make sense
         # when the three renderings are actually distinct.
         if [ "${old_name^^}" != "${old_name}" ]; then
-            sed -i -e "${DONKEY_GUARD}b" \
+            sed -i -e "${UPSTREAM_GUARD}b" \
                    -e "${LITERAL_GUARD}b" \
                    -e "s#\b${upper_re}\b#${NAME_UPPER}#g" "${file}"
         fi
@@ -556,12 +571,12 @@ rewrite_file() {  # $1 file, $2 old image name (""=skip), $3 old owner (""=skip)
             # where the name has to read exactly as it does in the file itself.
             # So the lowercase rule applies inside a fence, and only outside it
             # does the capitalised form take over.
-            sed -i -e "${DONKEY_GUARD}b" \
+            sed -i -e "${UPSTREAM_GUARD}b" \
                    -e "${LITERAL_GUARD}b" \
                    -e "${FENCE}{s#\b\(${name_re}\|${cap_re}\)\b#${NAME_LOWER}#g}" "${file}"
             # "b" branches past the rest of the script for lines inside a fence,
             # so the prose rules cannot undo the pass above.
-            sed -i -e "${DONKEY_GUARD}b" \
+            sed -i -e "${UPSTREAM_GUARD}b" \
                    -e "${LITERAL_GUARD}b" \
                    -e "${FENCE}b" \
                    -e "s#\(^\|[^/]\)\b\(${name_re}\|${cap_re}\)\b#\1${NAME_CAP}#g" \
@@ -570,7 +585,7 @@ rewrite_file() {  # $1 file, $2 old image name (""=skip), $3 old owner (""=skip)
             # Outside the README the name is always a real image reference and
             # stays lowercase - except where a comment quotes the ISO filename,
             # which is uppercase and was handled by the pass above.
-            sed -i -e "${DONKEY_GUARD}b" \
+            sed -i -e "${UPSTREAM_GUARD}b" \
                    -e "${LITERAL_GUARD}b" \
                    -e "s#\b${name_re}\b#${NAME_LOWER}#g" "${file}"
         fi
@@ -578,7 +593,7 @@ rewrite_file() {  # $1 file, $2 old image name (""=skip), $3 old owner (""=skip)
 
     if [ -n "${old_owner}" ]; then
         owner_re=$(printf '%s' "${old_owner}" | sed 's/[].[^$*\\/]/\\&/g')
-        sed -i -e "${DONKEY_GUARD}b" \
+        sed -i -e "${UPSTREAM_GUARD}b" \
                -e "${LITERAL_GUARD}b" \
                -e "s#\b${owner_re}\b#${TARGET_OWNER}#gI" "${file}"
     fi

@@ -288,6 +288,49 @@ check "nothing was written"               "$(fingerprint "${T}")" "${before}"
 
 
 echo
+echo "Upstream URLs"
+# build.sh fetches Donkey from yardquit/donkey and section 5's example installs
+# a CSVDT release RPM from yardquit/csvdt. Neither is an image reference, so
+# both must survive a rename - and, less obviously, neither may block one: the
+# owner in them is this template's own, so a project belonging to that owner
+# has to be able to rename to it at all. That combination was broken once, and
+# the symptom was a first build failing in section 9c on a signature scope
+# nobody could line up, because the repair the error message suggested was
+# itself refused.
+#
+# Read out of the file rather than hard-coded: a project told to delete the
+# Donkey section, or the CSVDT example, still has to pass here.
+T="$(tree upstream)"
+upstreams=()
+for url in yardquit/donkey yardquit/csvdt; do
+    if grep -q -i -F -e "${url}" "${T}/build_files/build.sh"; then
+        upstreams+=("${url}")
+    else
+        skip "'${url}' survives a rename - this build.sh no longer mentions it"
+    fi
+done
+
+if [ "${#upstreams[@]}" -eq 0 ]; then
+    skip "renaming around upstream URLs - this build.sh mentions none"
+else
+    # Two renames, not one per URL: the refusal was never about which URL was
+    # present, only about the owner being one these files already name.
+    OWN="$(tree upstream-own)"
+    check "renaming to the owner they belong to"  "$(run "${OWN}" ludus yardquit)"    "0"
+    OTHER="$(tree upstream-other)"
+    check "renaming to a different owner"         "$(run "${OTHER}" ludus claudetest)" "0"
+
+    for url in "${upstreams[@]}"; do
+        want="$(grep -c -i -F -e "${url}" "${T}/build_files/build.sh")"
+        check "  '${url}' survives the first"  \
+            "$(grep -c -i -F -e "${url}" "${OWN}/build_files/build.sh")"   "${want}"
+        check "  '${url}' survives the second" \
+            "$(grep -c -i -F -e "${url}" "${OTHER}/build_files/build.sh")" "${want}"
+    done
+fi
+
+
+echo
 echo "--dry-run"
 T="$(tree dryrun)"
 before="$(fingerprint "${T}")"
