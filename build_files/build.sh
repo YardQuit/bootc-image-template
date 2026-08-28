@@ -674,6 +674,53 @@ rm -f /etc/skel/.emacs
 #            /usr/share/fish/vendor_completions.d/herdr.fish
 # --------------------------------------------------------------------------
 
+# --- Claude Code, fetched as a binary rather than through its installer
+# --------------------------------------------------------------------------
+# ## Not "curl | sh" like the two above, because claude.ai/install.sh cannot be
+# ## pointed anywhere. It reads no install-directory variable - the only one it
+# ## knows is CLAUDE_INSTALL_ALLOW_SUDO - its single argument is a version, and
+# ## it puts everything under $HOME, which during a build is /root: the symlink
+# ## to var/roothome that this section opens by describing. It stops there.
+# ##
+# ## The release files are public, so fetch one directly instead. "stable" is a
+# ## pointer file holding a version number, and that version's manifest.json
+# ## carries a sha256 and a size for each platform. Checking it is the one thing
+# ## the piped installers above cannot offer: they verify their own downloads,
+# ## against a manifest this build never sees, so a build takes their word for
+# ## it. Here the check is in the file you are reading.
+# ##
+# ## Roughly 320 MB in the image, which is the reason this is a block of its own
+# ## rather than a line among the others.
+# ##
+# ## DISABLE_AUTOUPDATER because /usr is read-only on a running system. The
+# ## updater does not fail on that - it installs a second copy into
+# ## ~/.local/bin, which then shadows this one on PATH. That is 320 MB per
+# ## account in /var, and an image that no longer decides which version anyone
+# ## runs; updating with the image is the whole point. "claude doctor" prints
+# ## "Auto-updates: disabled (set by env: DISABLE_AUTOUPDATER)" when it has
+# ## taken. /etc/profile.d covers login and interactive shells, which is where a
+# ## command-line tool is run from; a fish user wants the same line in
+# ## /etc/fish/conf.d.
+# case "$(uname -m)" in
+#     x86_64)  CLAUDE_PLATFORM="linux-x64" ;;
+#     aarch64) CLAUDE_PLATFORM="linux-arm64" ;;
+#     *) echo "Claude Code: no published build for $(uname -m)" >&2; exit 1 ;;
+# esac
+#
+# CLAUDE_RELEASES="https://downloads.claude.ai/claude-code-releases"
+# CLAUDE_VERSION="$(curl -fsSL "${CLAUDE_RELEASES}/stable")"
+# CLAUDE_SHA256="$(curl -fsSL "${CLAUDE_RELEASES}/${CLAUDE_VERSION}/manifest.json" \
+#     | python3 -c "import json,sys;print(json.load(sys.stdin)['platforms']['${CLAUDE_PLATFORM}']['checksum'])")"
+#
+# curl -fsSL -o /usr/bin/claude \
+#     "${CLAUDE_RELEASES}/${CLAUDE_VERSION}/${CLAUDE_PLATFORM}/claude"
+# echo "${CLAUDE_SHA256}  /usr/bin/claude" | sha256sum -c -
+# chmod 0755 /usr/bin/claude
+#
+# printf 'export DISABLE_AUTOUPDATER=1\n' > /etc/profile.d/claude-code.sh
+# chmod 0644 /etc/profile.d/claude-code.sh
+# --------------------------------------------------------------------------
+
 
 #############################################################################
 ## 7. Clean up
