@@ -1,0 +1,46 @@
+# Packages installed into the image, one per line.
+# Blank lines and lines starting with # are ignored.
+#
+# One flat list, sorted alphabetically - easier to scan and to keep tidy than
+# grouped sections. Anything in the repos enabled in your base image works here.
+# To check a name before adding it:  dnf info <package>
+#
+# Not every package the image installs is here, deliberately. Anything a later
+# section of build.sh needs by name - tuned and firewalld for the units it
+# enables, plymouth for the splash screen - is installed there instead, beside
+# the thing that needs it. Rewriting this list is expected; losing a service
+# out of the image while doing it is not, and that is what the split prevents.
+
+bat
+btop
+distrobox
+dnf5-plugins
+emacs
+fastfetch
+fd-find
+fzf
+helix
+htop
+jetbrains-mono-fonts-all
+neovim
+NetworkManager-tui
+pam_yubico
+podman-compose
+ripgrep
+tcpdump
+tmux
+wireguard-tools
+wl-clipboard
+zoxide
+
+# Uncomment what you need.
+# cargo
+# chromium
+# gh
+# git-lfs
+# golang
+# libreoffice
+# mpv
+# rclone
+# rust
+# zig

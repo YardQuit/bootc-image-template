@@ -1,0 +1,44 @@
+# Configuration for the installer ISO, used by bootc-image-builder.
+#
+# The ISO boots the Anaconda installer. The kickstart below runs at the end of
+# the installation and points the installed system at your published image, so
+# future "bootc upgrade" runs pull from there.
+
+# The tag below is what the installed machine tracks from then on, and it is
+# ":latest" on purpose - whatever tag the ISO itself was built from.
+# bootc-image-builder writes its own "bootc switch" into the kickstart first,
+# pointing at the exact image it was handed: ghcr.io/myorg/myimage:v2 for a
+# tagged CI build, or localhost/myimage:latest for ./scripts/build-disk.sh,
+# which the installed machine cannot reach at all. This %post runs after that
+# one and overrides it, which is what makes a locally built ISO install a
+# machine that upgrades from the registry rather than from nowhere.
+#
+# So an ISO built from any tag installs a machine that follows :latest. Pin the
+# tag here instead if you want machines held on a particular release.
+
+# --erroronfail matters more than it looks. Anaconda ignores a failing %post by
+# default: the install would finish, report success, and hand you a machine
+# whose bootc origin still points at the base image - so every "bootc upgrade"
+# from then on tracks the base rather than your image, and nothing ever says
+# so. With the flag, a failed switch stops the install where you can see it.
+[customizations.installer.kickstart]
+contents = """
+%post --erroronfail
+bootc switch --mutate-in-place --transport registry ghcr.io/myorg/myimage:latest
+%end
+"""
+
+# Which installer screens to show. Fewer modules = a shorter, simpler install.
+[customizations.installer.modules]
+enable = [
+  "org.fedoraproject.Anaconda.Modules.Users",
+  "org.fedoraproject.Anaconda.Modules.Storage",
+  "org.fedoraproject.Anaconda.Modules.Runtime",
+  "org.fedoraproject.Anaconda.Modules.Network",
+  "org.fedoraproject.Anaconda.Modules.Timezone",
+]
+disable = [
+  "org.fedoraproject.Anaconda.Modules.Security",
+  "org.fedoraproject.Anaconda.Modules.Services",
+  "org.fedoraproject.Anaconda.Modules.Subscription",
+]

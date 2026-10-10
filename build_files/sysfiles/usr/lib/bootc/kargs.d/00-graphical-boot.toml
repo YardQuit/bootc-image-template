@@ -1,0 +1,10 @@
+# Kernel arguments bootc applies when this image is installed or switched to.
+#
+# rhgb  ("Red Hat graphical boot") is what tells plymouth to draw the splash
+#       screen; without it plymouth is installed but never shows.
+# quiet keeps the kernel's own log off the screen behind it. Drop "quiet" while
+#       debugging a boot problem - you lose the tidy splash, not the boot.
+#
+# "bootc container lint" parses this file during the build, so a syntax mistake
+# here fails CI rather than shipping.
+kargs = ["rhgb", "quiet"]

@@ -1,0 +1,170 @@
+---
+# Do the bases the Containerfile offers still provide what build.sh installs?
+#
+# Nothing here builds an image. It asks each base the one question that goes
+# stale on its own - can dnf still install what this template asks for? - which
+# takes a minute or two per base instead of the ten a build costs, and is where
+# every cross-base problem this template has hit actually lived.
+#
+# Two questions, and they fail differently:
+#
+#   the rpm_packages list   Installed with the same flag section 3 uses. This
+#                           must not fail on any base, ever: the whole point of
+#                           strict=0 is that a package list cannot break a
+#                           build. It has not always held. Project Hummingbird
+#                           carries NetworkManager-tui with a dependency
+#                           nothing in its repositories provides, which stopped
+#                           the build on Fedora while CentOS shrugged, back
+#                           when the two dnf versions were driven by separate
+#                           flags that had drifted apart. They are one
+#                           invocation now, and this is what keeps the flag
+#                           honest: dnf5 honours strict, and would exit 2 if a
+#                           release ever stopped.
+#
+#   the six by name         What sections 8 and 9b install with pkg_install,
+#                           which has no skip flags and stops the build. A base
+#                           that stops carrying one of these breaks a build
+#                           that worked yesterday, so on a base expected to
+#                           have them that is a failure here. Hummingbird has
+#                           none of them and is not expected to - there it is
+#                           reported and the job stays green.
+#
+# One desktop base stands for all eight: the fedora-ostree-desktops images
+# differ by session, not by repository, so what dnf can install is the same
+# across them.
+#
+# Scheduled rather than run on every push, because what changes here is the
+# bases, not this repository. Run it by hand from the Actions tab after editing
+# rpm_packages or a pkg_install line - that is the other time the answer moves.
+#
+# Deletable, like tests/: a project that has settled on one base has no use for
+# it, and nothing else in the repository refers to this file.
+name: Base check
+
+on:
+  schedule:
+    - cron: "30 05 * * 1"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  bases:
+    name: ${{ matrix.label }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+
+    strategy:
+      # Every base is reported, not just the first to break. One base going
+      # bad says nothing about the others, and finding that out one run at a
+      # time would take a month at this schedule.
+      fail-fast: false
+      matrix:
+        include:
+          - label: Fedora Atomic Desktops
+            base: quay.io/fedora-ostree-desktops/silverblue:44
+            expect_named: true
+          - label: Fedora bootc
+            base: quay.io/fedora/fedora-bootc:44
+            expect_named: true
+          - label: CentOS Stream
+            base: quay.io/centos-bootc/centos-bootc:stream10
+            expect_named: true
+          - label: AlmaLinux
+            base: quay.io/almalinuxorg/almalinux-bootc:10
+            expect_named: true
+          - label: Project Hummingbird
+            base: quay.io/hummingbird-community/bootc-os:latest
+            expect_named: false
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      # This workflow repeats the dnf commands build.sh uses, because it runs
+      # them against a bare base rather than through build.sh. Two copies of the
+      # same thing drift, so the copy is checked rather than trusted: change
+      # section 3 and this fails here, naming the line to update, instead of
+      # quietly testing something the build no longer does.
+      - name: The commands below still match build.sh
+        run: |
+          set -euo pipefail
+          if ! grep -q -- 'dnf install --setopt=strict=0 -y' build_files/build.sh; then
+            echo "build_files/build.sh no longer installs the package list with" >&2
+            echo "\"dnf install --setopt=strict=0 -y\". Update the two steps" >&2
+            echo "below to match section 3, then rerun." >&2
+            exit 1
+          fi
+          echo "commands match section 3 of build.sh"
+
+      # The package list. Failing here means a base can break a build through
+      # rpm_packages alone, which the skip flags exist to make impossible.
+      - name: The rpm_packages list installs
+        env:
+          BASE: ${{ matrix.base }}
+        run: |
+          set -euo pipefail
+          podman run --rm \
+            --volume "${PWD}/build_files/rpm_packages:/rpm_packages:ro" \
+            "${BASE}" bash -c '
+              set -euo pipefail
+              PACKAGES=$({ grep -vE "^\s*(#|$)" /rpm_packages || true; } | tr "\n" " ")
+              [ -n "${PACKAGES}" ] || { echo "rpm_packages is empty - nothing to check"; exit 0; }
+              dnf install --setopt=strict=0 -y ${PACKAGES}
+              echo
+              echo "asked for $(wc -w <<<"${PACKAGES}") names; these did not arrive:"
+              # "|| true" for the same reason section 3 has it: whatprovides
+              # exits non-zero the moment one name is unresolved, which is the
+              # normal case here and must not fail the step under pipefail.
+              { rpm -q --whatprovides ${PACKAGES} 2>&1 || true; } \
+                | sed -n "s/^no package provides //p" | sed "s/^/  /"
+            ' 2>&1 | tee "${RUNNER_TEMP}/list.log"
+
+      # The six sections 8 and 9b install by name. pkg_install has no skip
+      # flags, so a missing one of these is a stopped build, not a gap.
+      - name: The packages build.sh installs by name
+        env:
+          BASE: ${{ matrix.base }}
+          EXPECT_NAMED: ${{ matrix.expect_named }}
+          # Through env, not interpolated into the script below: the same rule
+          # build.yml follows for every value it hands to a shell.
+          LABEL: ${{ matrix.label }}
+        run: |
+          set -euo pipefail
+          NAMED="tuned firewalld crontabs cronie-anacron plymouth plymouth-system-theme"
+          rc=0
+          podman run --rm "${BASE}" bash -c "
+            set -euo pipefail
+            dnf install -y ${NAMED}
+          " > "${RUNNER_TEMP}/named.log" 2>&1 || rc=$?
+
+          {
+            echo "### ${LABEL}"
+            echo
+            echo '```'
+            echo "base: ${BASE}"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+          if [ "${rc}" -eq 0 ]; then
+            echo "all six install: tuned firewalld crontabs cronie-anacron plymouth plymouth-system-theme" \
+              >> "${GITHUB_STEP_SUMMARY}"
+          elif [ "${EXPECT_NAMED}" = "true" ]; then
+            echo "MISSING - this base is expected to carry all six" >> "${GITHUB_STEP_SUMMARY}"
+            grep -E "No match for argument|nothing provides" "${RUNNER_TEMP}/named.log" \
+              | sed 's/^/  /' >> "${GITHUB_STEP_SUMMARY}" || true
+            echo '```' >> "${GITHUB_STEP_SUMMARY}"
+            echo "Sections 8 and 9b install these by name and stop when one is" >&2
+            echo "missing, so a build on ${BASE} is broken right now. Either the" >&2
+            echo "base dropped a package, or it renamed one." >&2
+            cat "${RUNNER_TEMP}/named.log" >&2
+            exit 1
+          else
+            echo "not carried here, which is known and expected for this base:" \
+              >> "${GITHUB_STEP_SUMMARY}"
+            grep -E "No match for argument|nothing provides" "${RUNNER_TEMP}/named.log" \
+              | sed 's/^/  /' >> "${GITHUB_STEP_SUMMARY}" || true
+          fi
+          echo '```' >> "${GITHUB_STEP_SUMMARY}"

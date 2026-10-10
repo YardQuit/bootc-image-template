@@ -1,0 +1,116 @@
+---
+# Static checks on the repository itself: the shell it ships, and the tests for
+# the rename script.
+#
+# Separate from build.yml on purpose. This runs in under a minute and has no
+# registry, no signing key and no reason to be skipped, so it can run on every
+# push and pull request - including the documentation-only ones build.yml
+# ignores, which are exactly the ones that touch README.md and can therefore
+# change what the rename script sees.
+name: Checks
+
+# Every branch, deliberately. build.yml has to name its branches, because it
+# publishes and must not do that from just anywhere - and its comment tells you
+# to add yours to those lists. This one publishes nothing, so a branch filter
+# here buys no safety and costs the whole point of the workflow: a repository
+# whose default branch is neither main nor master would get no checks at all,
+# silently, and nothing anywhere would say so. Running everywhere also means
+# feature branches are checked before the pull request exists.
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    name: Shell and rename tests
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      # Every tests/*.test.sh there is. They cover the two scripts that fail
+      # quietly rather than loudly: the rename script, which rewrites every
+      # image reference by whole-word substitution and on a wrong guard writes
+      # a plausible-looking file rather than crashing; and the disk.toml
+      # password guard, whose first version could never be satisfied at all.
+      # None of them needs the network, podman or root.
+      #
+      # Discovered rather than listed, so that "rm -rf tests/" is the entire
+      # operation and leaves nothing red behind. These test the template's own
+      # scripts, which a project built from it runs but does not edit, so
+      # deleting the directory is a perfectly reasonable first thing to do -
+      # see "Removing the tests" in README.md. Adding a suite needs no edit
+      # here either.
+      - name: Tests
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          suites=(tests/*.test.sh)
+          if [ "${#suites[@]}" -eq 0 ]; then
+            echo "No tests/ directory in this repository - nothing to run."
+            exit 0
+          fi
+          for suite in "${suites[@]}"; do
+            echo "=== ${suite} ==="
+            "${suite}"
+          done
+
+      # ShellCheck is preinstalled on the GitHub runner images; the fallback is
+      # for self-hosted runners that do not carry it.
+      #
+      # --severity=warning is the bar: it catches the bugs (unquoted expansions
+      # that will word-split, misused test operators, unreachable code) without
+      # failing on style opinions. SC1090 is excluded because ShellCheck cannot
+      # follow "source" of a path it only learns at run time, which is what
+      # build.sh does when it reads /etc/os-release.
+      #
+      # The repository is green at this setting. If a new finding appears, it
+      # is worth reading before it is silenced.
+      - name: ShellCheck
+        run: |
+          set -euo pipefail
+          if ! command -v shellcheck >/dev/null; then
+            sudo apt-get update -qq
+            sudo apt-get install -y shellcheck
+          fi
+          # nullglob for the same reason as above: with tests/ deleted the
+          # glob must vanish rather than reach ShellCheck as a literal path
+          # that does not exist.
+          shopt -s nullglob
+          files=(build_files/build.sh scripts/*.sh tests/*.sh)
+          shellcheck --severity=warning --exclude=SC1090 "${files[@]}"
+
+      # None of these files is read by anything until much later: the workflows
+      # by GitHub, the disk_config ones halfway through an ISO build, and the
+      # two under sysfiles by the running machine - where a broken kargs.d file
+      # means a system that boots differently than intended and nothing says
+      # why. Parsing them here costs nothing.
+      - name: Parse the YAML and TOML files
+        run: |
+          set -euo pipefail
+          python3 - <<'EOF'
+          import glob, tomllib, yaml
+
+          yml = glob.glob(".github/**/*.yml", recursive=True) \
+              + glob.glob("build_files/sysfiles/**/*.yaml", recursive=True)
+          toml = glob.glob("disk_config/*.toml") \
+              + glob.glob("build_files/sysfiles/**/*.toml", recursive=True)
+
+          for path in sorted(yml):
+              with open(path) as f:
+                  yaml.safe_load(f)
+              print("ok  ", path)
+
+          for path in sorted(toml):
+              with open(path, "rb") as f:
+                  tomllib.load(f)
+              print("ok  ", path)
+          EOF

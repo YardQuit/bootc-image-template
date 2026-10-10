@@ -1,0 +1,284 @@
+---
+# Turns the published container image into a bootable installer ISO.
+#
+# This is a manual workflow (Actions tab -> Build ISO -> Run workflow) because
+# an ISO build takes far longer than a container build and you rarely need one
+# on every commit.
+#
+# The work is done by bootc-image-builder, which runs as a privileged
+# container - that is how the tool is meant to be used.
+#
+# bootc-image-builder can also produce qcow2 and raw disk images. This workflow
+# deliberately does not: scripts/build-disk.sh still builds those locally when
+# you want one, using disk_config/disk.toml.
+name: Build ISO
+
+on:
+  workflow_dispatch:
+    inputs:
+      # Which published image the ISO is built from. It does not change what
+      # the installed machine follows afterwards: the kickstart in
+      # disk_config/iso.toml points that at :latest, deliberately, and runs
+      # after the switch bootc-image-builder writes for this tag. So an ISO
+      # built from v2 carries v2 and installs a machine that upgrades to
+      # whatever :latest becomes.
+      tag:
+        description: "Image tag to build the ISO from (machines still track :latest)"
+        required: false
+        default: "latest"
+        type: string
+      upload-to-s3:
+        description: "Upload the ISO to S3 instead of attaching it to the job"
+        required: false
+        default: false
+        type: boolean
+
+env:
+  # Must match IMAGE_NAME in build.yml. scripts/set-image-name.sh rewrites both,
+  # and the ISO is named after it, so renaming the image renames the ISO too.
+  IMAGE_NAME: "myimage"
+  IMAGE_REGISTRY: "ghcr.io/${{ github.repository_owner }}"
+  BUILDER_IMAGE: "quay.io/centos-bootc/bootc-image-builder:latest"
+
+# An ISO build is manual and slow, and two of them usually mean two different
+# tags. The input is part of the group so those run side by side; dispatching
+# the same tag twice still cancels the older run, which is the case where the
+# first result is genuinely worthless.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ inputs.tag }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build ISO
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: read   # to pull your image from the registry
+
+    steps:
+      # ISOs need even more room than container builds.
+      - name: Free up disk space
+        run: |
+          sudo rm -rf \
+            /usr/share/dotnet \
+            /usr/share/swift \
+            /usr/local/lib/android \
+            /usr/local/.ghcup \
+            /opt/hostedtoolcache/CodeQL \
+            /opt/google/chrome \
+            /opt/microsoft
+          df -h /
+
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      # Every per-project name in this repository - the image name here, the
+      # signature policy scope in build_files/build.sh, the kickstart in
+      # disk_config/iso.toml - starts life as a placeholder that
+      # scripts/set-image-name.sh rewrites. Copying a file down from the
+      # template later brings the placeholder back, and the rename script
+      # cannot repair that unless it is run again: it reads the name to
+      # replace out of the very files it rewrites, so in an already-renamed
+      # repository it substitutes the current name for itself and leaves the
+      # fresh placeholder alone.
+      #
+      # This check costs a second and turns that into a red build here rather
+      # than an image whose signature policy guards a repository nobody
+      # publishes to, or an ISO that installs a system pointing at one. An
+      # untouched template passes: there the placeholders are the real values.
+      - name: Check for leftover template placeholders
+        run: ./scripts/set-image-name.sh --check
+
+      - name: Build ISO
+        id: build
+        env:
+          # Provided automatically by GitHub; no secret to create. The job's
+          # "packages: read" permission above is what makes it usable here.
+          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # The dispatch input reaches the script as an environment variable
+          # rather than being interpolated into the shell below. GitHub expands
+          # ${{ }} into the script text before bash ever sees it, so an input
+          # containing shell syntax would be executed by this step - which runs
+          # sudo and holds a registry token. Whoever can dispatch this workflow
+          # can already push to the repository, so this is not a hole so much
+          # as one less thing standing open.
+          IMAGE_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+
+          IMAGE_NAME="${IMAGE_NAME,,}"
+          IMAGE_REGISTRY="${IMAGE_REGISTRY,,}"
+          IMAGE_REF="${IMAGE_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}"
+
+          # Same date format as the image tags in build.yml, taken once here so
+          # the upload step cannot pick a different day if the build runs over
+          # midnight.
+          DATE="$(date -u +%Y%m%d)"
+
+          mkdir -p output
+
+          # Log in before pulling. A package published by build.yml is private
+          # until you make it public on its GHCR package page, and an anonymous
+          # pull of a private package fails while requesting a bearer token:
+          #
+          #   Requesting bearer token: received unexpected HTTP status: 403 Forbidden
+          #
+          # ghcr.io answers exactly the same way for a package that does not
+          # exist at all, so that error on its own does not tell you which of
+          # the two you are looking at. Logging in every time keeps a private
+          # package working and narrows a 403 down to "never published" - check
+          # that build.yml ran on your default branch and its push step was not
+          # skipped.
+          #
+          # Under sudo, like the pull below, so the credentials land in root's
+          # auth file where that pull can actually see them.
+          sudo podman login ghcr.io \
+            --username "${GITHUB_ACTOR}" \
+            --password "${REGISTRY_TOKEN}"
+
+          # bootc-image-builder does not fetch the image it is told to build any
+          # more - it only reads root's container storage, which is bind-mounted
+          # below. Without this pull it stops at "image not known" while
+          # generating the manifest, before any building starts.
+          #
+          # This runs under sudo on purpose: the builder reads root's storage,
+          # and a rootless pull would land in the runner user's storage instead.
+          sudo podman pull "${IMAGE_REF}"
+
+          # Name the ISO after what is actually inside the image, so changing
+          # the base in the Containerfile renames the ISO by itself. Both halves
+          # are read from the image rather than hardcoded: the tag input only
+          # selects which image to pull, so building from ":latest" still yields
+          # the real version, not "latest".
+          #
+          #   NAME     "Fedora Linux" / "CentOS Stream" -> first word
+          #   VERSION  "44.20260819.0 (COSMIC Atomic)"  -> first word
+          #            bases that do not set VERSION fall back to VERSION_ID
+          #            (CentOS Stream 10 -> 10)
+          OS_INFO="$(sudo podman run --rm "${IMAGE_REF}" sh -c '
+            . /etc/os-release
+            V="${VERSION%% *}"
+            [ -n "${V}" ] || V="${VERSION_ID:-}"
+            printf "%s\n%s\n" "${NAME%% *}" "${V}"')"
+          OS_NAME="$(printf "%s" "${OS_INFO}" | sed -n 1p)"
+          OS_VERSION="$(printf "%s" "${OS_INFO}" | sed -n 2p)"
+          if [ -z "${OS_NAME}" ] || [ -z "${OS_VERSION}" ]; then
+            echo "Could not read NAME/VERSION from ${IMAGE_REF}'s os-release." >&2
+            exit 1
+          fi
+
+          # e.g. Fedora-MYIMAGE-Atomic-44.20260819.0.iso
+          #      CentOS-MYIMAGE-Atomic-10.iso
+          #
+          # "Atomic" stays fixed on purpose: it describes how the system is
+          # updated - the whole image is replaced and you reboot into it, with
+          # rollback - and that is true of every base this template can use,
+          # Fedora Atomic Desktops and bootc images alike. A base that did not
+          # work that way would fail "bootc container lint" in the Containerfile
+          # long before reaching this line.
+          ISO_NAME="${OS_NAME}-${IMAGE_NAME^^}-Atomic-${OS_VERSION}.iso"
+          echo "ISO will be named: ${ISO_NAME}"
+
+          # --privileged and the storage mount are required by the builder.
+          # --chown makes the output readable by the normal runner user.
+          sudo podman run --rm --privileged \
+            --pull=newer \
+            --security-opt label=type:unconfined_t \
+            --volume /var/lib/containers/storage:/var/lib/containers/storage \
+            --volume "${PWD}/disk_config/iso.toml:/config.toml:ro" \
+            --volume "${PWD}/output:/output" \
+            "${BUILDER_IMAGE}" \
+            --type iso \
+            --rootfs btrfs \
+            --chown "$(id -u):$(id -g)" \
+            "${IMAGE_REF}"
+
+          # bootc-image-builder always writes output/bootiso/install.iso. Give it
+          # the name worked out above so it is recognisable once downloaded, and
+          # flatten it so the artifact and the bucket both hold a plain ISO file
+          # rather than a bootiso/ directory.
+          ISO_SRC="$(find output -type f -name '*.iso' -print -quit)"
+          if [ -z "${ISO_SRC}" ]; then
+            echo "No .iso found under output/ - the build produced nothing." >&2
+            exit 1
+          fi
+          if [ "${ISO_SRC}" != "output/${ISO_NAME}" ]; then
+            mv "${ISO_SRC}" "output/${ISO_NAME}"
+          fi
+
+          # bootc-image-builder also writes manifest-iso.json - the osbuild
+          # manifest the ISO was built from, handy when debugging a build.
+          # It travels to S3 with everything else in output/, so give it the
+          # ISO's name too: several projects uploading into the same bucket
+          # would otherwise each write "manifest-iso.json" and overwrite one
+          # another's. Fedora-MYIMAGE-Atomic-44….iso gets
+          # Fedora-MYIMAGE-Atomic-44….manifest-iso.json alongside it.
+          for manifest in output/manifest-*.json; do
+            [ -f "${manifest}" ] || continue
+            mv "${manifest}" "output/${ISO_NAME%.iso}.$(basename "${manifest}")"
+          done
+
+          find output -mindepth 1 -type d -empty -delete
+
+          ls -lh output
+          echo "prefix=${DATE}" >> "${GITHUB_OUTPUT}"
+
+      # Two ways out, picked by the upload-to-s3 input. An ISO is several GB, so
+      # it goes to one place or the other rather than both.
+      - name: Attach ISO to the job
+        if: ${{ !inputs.upload-to-s3 }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ env.IMAGE_NAME }}-iso
+          path: output
+          if-no-files-found: error
+          # ISOs are already compressed; zipping them again wastes time.
+          compression-level: 0
+
+      # Needs these repository secrets: S3_PROVIDER, S3_ACCESS_KEY_ID,
+      # S3_SECRET_ACCESS_KEY, S3_REGION, S3_ENDPOINT, S3_BUCKET_NAME.
+      - name: Upload ISO to S3
+        if: ${{ inputs.upload-to-s3 }}
+        env:
+          # rclone reads its whole config from these, so no config file is
+          # needed. S3_PROVIDER is the rclone provider name, e.g. "Minio",
+          # "Cloudflare", "Wasabi", or "AWS" - see "rclone config providers".
+          RCLONE_CONFIG_S3_TYPE: s3
+          RCLONE_CONFIG_S3_PROVIDER: ${{ secrets.S3_PROVIDER }}
+          RCLONE_CONFIG_S3_ACCESS_KEY_ID: ${{ secrets.S3_ACCESS_KEY_ID }}
+          RCLONE_CONFIG_S3_SECRET_ACCESS_KEY: ${{ secrets.S3_SECRET_ACCESS_KEY }}
+          RCLONE_CONFIG_S3_REGION: ${{ secrets.S3_REGION }}
+          RCLONE_CONFIG_S3_ENDPOINT: ${{ secrets.S3_ENDPOINT }}
+          S3_BUCKET_NAME: ${{ secrets.S3_BUCKET_NAME }}
+          # Each build lands under its own date, so a new ISO never overwrites
+          # yesterday's. Drop this from the destination below if you would
+          # rather keep a single, always-newest copy in the bucket root.
+          S3_PREFIX: ${{ steps.build.outputs.prefix }}
+        run: |
+          set -euo pipefail
+
+          # Fail with a clear message rather than having rclone write into a
+          # bucket named "" or silently succeed against no destination.
+          if [ -z "${S3_BUCKET_NAME}" ]; then
+            echo "S3_BUCKET_NAME repository secret is not set - cannot upload." >&2
+            exit 1
+          fi
+          if [ -z "${S3_PREFIX}" ]; then
+            echo "No date prefix from the build step - refusing to upload to" >&2
+            echo "the bucket root, which would overwrite an existing ISO." >&2
+            exit 1
+          fi
+
+          sudo apt-get update
+          sudo apt-get install -y rclone
+
+          echo "Uploading to S3:${S3_BUCKET_NAME}/${S3_PREFIX}/"
+          rclone copy --stats=30s --stats-one-line output "S3:${S3_BUCKET_NAME}/${S3_PREFIX}"
+
+          # rclone copy is silent on success (the NOTICE about a missing config
+          # file is normal - the remote is defined entirely by the env vars
+          # above), which reads like a failure. End with proof instead: list
+          # what the bucket now holds under this prefix, name and size.
+          echo "Uploaded:"
+          rclone ls "S3:${S3_BUCKET_NAME}/${S3_PREFIX}"

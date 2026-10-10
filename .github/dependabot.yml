@@ -1,0 +1,34 @@
+---
+# Dependabot opens a pull request when a GitHub Action used in
+# .github/workflows/ has a newer version.
+#
+# Full reference:
+# https://docs.github.com/code-security/dependabot/dependabot-version-updates
+version: 2
+updates:
+  # Only the actions. The base image in the Containerfile is deliberately not
+  # watched, though Dependabot's docker ecosystem would match "Containerfile"
+  # as well as "Dockerfile" if you added it.
+  #
+  # It cannot tell a released Fedora from one still in development, and Fedora
+  # has two development streams: Rawhide, the rolling one, and Branched, which
+  # forks off Rawhide and is - in Fedora's own words - "a Fedora development
+  # release tree named after the Fedora release it will become".
+  # (https://docs.fedoraproject.org/en-US/releases/branched/)
+  #
+  # Named after the release it will become, not one that exists: the tag for
+  # the next version is therefore live months early, carrying a
+  # release-candidate kernel and, before the fork, the very same image as
+  # Rawhide. Dependabot sees nothing in it but a higher number, so following it
+  # would move this image onto a pre-release without saying so.
+  #
+  # Watch for new Fedora and CentOS releases yourself and edit the FROM line
+  # when you mean to.
+  - package-ecosystem: "github-actions"
+    directory: "/"          # workflows live in .github/workflows, "/" is correct
+    schedule:
+      interval: "weekly"
+    # Keeps the pull request list short.
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "ci"

@@ -1,0 +1,450 @@
+---
+# Builds the container image and publishes it to GitHub Container Registry
+# (ghcr.io). Pull requests build the image but never publish it.
+#
+# Everything is done with plain podman commands on purpose:
+#   * fewer third-party actions to trust and keep updated
+#   * the build is the same locally (scripts/build.sh) and in CI
+#   * container-build actions such as redhat-actions/buildah-build and
+#     redhat-actions/push-to-registry force buildah/podman to use
+#     fuse-overlayfs, which is several times slower than the kernel's own
+#     overlay driver on GitHub runners (a ~12 min build became ~60 min).
+name: Build container image
+
+on:
+  # Rebuild every day so the image picks up upstream package updates.
+  schedule:
+    - cron: "00 04 * * *"
+  push:
+    # Both common default-branch names, because trigger lists must be literal.
+    # A repository created from this template inherits its creator's default
+    # branch name, so the template cannot know which one it will be - and a
+    # branch missing here fails silently: no build ever runs for it. If your
+    # default branch is named something else, add it to both lists. (The
+    # publish/sign steps below do not need the same edit - they compare
+    # against the repository's actual default branch at run time.)
+    branches:
+      - main
+      - master
+    paths-ignore:
+      - "**.md"
+  pull_request:
+    branches:
+      - main
+      - master
+  # Adds a "Run workflow" button in the Actions tab.
+  workflow_dispatch:
+
+env:
+  # The published image name: ghcr.io/<owner>/<IMAGE_NAME>
+  #
+  # Change it with ./scripts/set-image-name.sh, which rewrites the name
+  # everywhere else it appears too - the signature policy scope, the ISO
+  # kickstart, the registries.d entry, os-release. A literal here is the point:
+  # replacing it with an expression such as the repository name would leave
+  # this the only place that follows, while every other reference stayed put,
+  # and "set-image-name.sh --check" - which both workflows run before they
+  # build - would read the expression itself as the current name and fail on
+  # every run.
+  IMAGE_NAME: "myimage"
+  IMAGE_DESC: "My personal bootable container image"
+  # Lowercased in the build step - ghcr.io rejects uppercase names.
+  IMAGE_REGISTRY: "ghcr.io/${{ github.repository_owner }}"
+
+# A new push cancels a run that is still going for the same branch.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build and push image
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write   # needed to push to ghcr.io
+
+    # The prune job below needs the same lowercased name this job builds with.
+    outputs:
+      image_name: ${{ steps.build.outputs.image_name }}
+
+    steps:
+      # Bootable images are big (several GB). The runner ships with toolchains
+      # you don't need; removing them buys ~25 GB of disk.
+      - name: Free up disk space
+        run: |
+          sudo rm -rf \
+            /usr/share/dotnet \
+            /usr/share/swift \
+            /usr/local/lib/android \
+            /usr/local/.ghcup \
+            /opt/hostedtoolcache/CodeQL \
+            /opt/google/chrome \
+            /opt/microsoft
+          df -h /
+
+      # Dependabot (.github/dependabot.yml) keeps these action versions current.
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      # Every per-project name in this repository - the image name here, the
+      # signature policy scope in build_files/build.sh, the kickstart in
+      # disk_config/iso.toml - starts life as a placeholder that
+      # scripts/set-image-name.sh rewrites. Copying a file down from the
+      # template later brings the placeholder back, and the rename script
+      # cannot repair that unless it is run again: it reads the name to
+      # replace out of the very files it rewrites, so in an already-renamed
+      # repository it substitutes the current name for itself and leaves the
+      # fresh placeholder alone.
+      #
+      # This check costs a second and turns that into a red build here rather
+      # than an image whose signature policy guards a repository nobody
+      # publishes to, or an ISO that installs a system pointing at one. An
+      # untouched template passes: there the placeholders are the real values.
+      - name: Check for leftover template placeholders
+        run: ./scripts/set-image-name.sh --check
+
+      # Signing is required: the image ships a policy.json rule (build.sh
+      # section 9c) that makes "bootc upgrade" refuse anything unsigned, so an
+      # unsigned publish would produce an image no machine can update to. The
+      # cosign steps therefore fail rather than skip when the key is missing.
+      # See the README for how to create the key pair.
+      #
+      # cosign is installed and the key checked BEFORE the image is built and
+      # pushed, on purpose: a key problem found after the push would leave an
+      # unsigned :latest in the registry that every machine then refuses -
+      # a red build and a stuck fleet. Failing here costs nothing but a job.
+      #
+      # To build without signatures, remove the three cosign steps - "Install
+      # cosign", "Check signing key" and "Sign image" - together with section
+      # 9c in build_files/build.sh. Dropping either half alone leaves a system
+      # demanding a signature that nothing produces.
+      - name: Install cosign
+        if: >-
+          github.event_name != 'pull_request' &&
+          (github.event_name == 'schedule' ||
+           github.ref == format('refs/heads/{0}', github.event.repository.default_branch))
+        uses: sigstore/cosign-installer@v4.1.2
+        with:
+          # Pinned to the 2.x series on purpose. cosign 3.x (the action's
+          # default) writes the signature as an OCI 1.1 referrers attachment,
+          # tagged "sha256-<digest>". containers/image - what "bootc upgrade"
+          # uses on the running system - only looks for the older
+          # "sha256-<digest>.sig" tag, so a 3.x signature is invisible to it
+          # and a sigstoreSigned policy can never be satisfied. Revisit once
+          # containers/image learns to read referrers.
+          cosign-release: 'v2.6.5'
+
+      - name: Check signing key
+        if: >-
+          github.event_name != 'pull_request' &&
+          (github.event_name == 'schedule' ||
+           github.ref == format('refs/heads/{0}', github.event.repository.default_branch))
+        env:
+          COSIGN_PRIVATE_KEY: ${{ secrets.SIGNING_SECRET }}
+          # Empty unless you set it. cosign generate-key-pair with an empty
+          # passphrase (press Enter twice) needs no value here; a key you gave
+          # a passphrase needs it as a second secret.
+          COSIGN_PASSWORD: ${{ secrets.SIGNING_SECRET_PASSWORD }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${COSIGN_PRIVATE_KEY}" ]; then
+            echo "No SIGNING_SECRET repository secret set." >&2
+            echo "This image requires signed updates: publishing it unsigned" >&2
+            echo "would leave every machine unable to upgrade to it. Create a" >&2
+            echo "key pair (see the README's Signing section) and add the" >&2
+            echo "private half as the SIGNING_SECRET secret, or remove the" >&2
+            echo "cosign steps here along with section 9c of build.sh." >&2
+            exit 1
+          fi
+
+          # The two halves live in different places - the public key committed
+          # in the repository, the private one in a secret - and nothing keeps
+          # them in step. Rotate or replace one and forget the other and every
+          # signature verifies against the wrong key. cosign can derive the
+          # public key from the private one, so the pair can be checked here,
+          # before anything is published.
+          if ! cosign public-key --key env://COSIGN_PRIVATE_KEY \
+               > "${RUNNER_TEMP}/derived.pub"; then
+            echo "Could not read SIGNING_SECRET as a cosign private key." >&2
+            echo "If the key has a passphrase, add it as the secret" >&2
+            echo "SIGNING_SECRET_PASSWORD; otherwise regenerate the pair with" >&2
+            echo "an empty passphrase (press Enter twice)." >&2
+            exit 1
+          fi
+          if ! diff -q "${RUNNER_TEMP}/derived.pub" build_files/cosign.pub \
+               > /dev/null; then
+            echo "SIGNING_SECRET does not match build_files/cosign.pub." >&2
+            echo "The image verifies updates against the committed public key," >&2
+            echo "so signatures made with this secret would be rejected by" >&2
+            echo "every machine. Commit the cosign.pub belonging to this key," >&2
+            echo "or set SIGNING_SECRET to the private half of the committed" >&2
+            echo "one." >&2
+            exit 1
+          fi
+          echo "SIGNING_SECRET matches build_files/cosign.pub."
+
+      - name: Build image
+        id: build
+        run: |
+          set -euo pipefail
+
+          # ghcr.io only accepts lowercase names.
+          IMAGE_NAME="${IMAGE_NAME,,}"
+          IMAGE_REGISTRY="${IMAGE_REGISTRY,,}"
+          DATE="$(date -u +%Y%m%d)"
+
+          # Use the kernel's overlay driver, not fuse-overlayfs. An empty
+          # mount_program means "none"; podman still falls back to
+          # fuse-overlayfs by itself if native overlay is unusable.
+          mkdir -p ~/.config/containers
+          cat > ~/.config/containers/storage.conf <<'EOF'
+          [storage]
+          driver = "overlay"
+
+          [storage.options.overlay]
+          mount_program = ""
+          EOF
+          podman info --format 'storage driver: {{.Store.GraphDriverName}} {{.Store.GraphOptions}}'
+
+          # Tags: latest, the date, and latest.<date> so old builds stay reachable.
+          TAGS=("latest" "${DATE}" "latest.${DATE}")
+
+          ARGS=()
+          for tag in "${TAGS[@]}"; do
+            ARGS+=(--tag "localhost/${IMAGE_NAME}:${tag}")
+          done
+
+          # Standard OCI labels - they show up in `podman inspect` and on the
+          # package page. containers.bootc=1 marks the image as bootable.
+          ARGS+=(
+            --label "org.opencontainers.image.title=${IMAGE_NAME}"
+            --label "org.opencontainers.image.description=${IMAGE_DESC}"
+            --label "org.opencontainers.image.source=${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}"
+            --label "org.opencontainers.image.revision=${GITHUB_SHA}"
+            --label "org.opencontainers.image.created=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            --label "org.opencontainers.image.licenses=MIT"
+            --label "containers.bootc=1"
+          )
+
+          # --format docker keeps compatibility with tools that don't read OCI.
+          #
+          # IMAGE_REPO tells build.sh which repository this image will actually
+          # be published to, so section 9c can check that against the scope of
+          # the policy.json rule it writes. They are set in different places -
+          # the scope in build.sh, the destination here from the repository
+          # owner - and a rule scoped to a repository that is never published
+          # matches nothing, which silently accepts unsigned images instead of
+          # rejecting them.
+          # Tee the build so the lint warnings can be lifted out of it below.
+          # They are printed by "bootc container lint" in the Containerfile and
+          # would otherwise be five lines somewhere in a few thousand.
+          #
+          # RUNNER_TEMP rather than /tmp: a hosted runner gets a fresh machine
+          # per job, but a self-hosted one does not, and two jobs sharing /tmp
+          # would read each other's build log - or follow a symlink planted
+          # where the file was expected.
+          podman build --file ./Containerfile --format docker \
+            --build-arg "IMAGE_REPO=${IMAGE_REGISTRY}/${IMAGE_NAME}" \
+            "${ARGS[@]}" . 2>&1 | tee "${RUNNER_TEMP}/build.log"
+
+          # Lint warnings do not fail the build - see the Containerfile for why -
+          # so put them where they will actually be read. They describe a system
+          # that boots and then misbehaves, most often a directory in /var that
+          # no tmpfiles.d rule recreates and which is therefore empty on every
+          # machine that installs the image.
+          # Bounded at the lint summary line rather than at the next blank
+          # line. A blank line is not guaranteed to follow the last warning,
+          # and when it does not, a range ending at /^$/ never closes and the
+          # entire rest of the build log lands in the summary. No summary line
+          # means lint did not finish, and there is nothing to report.
+          WARNINGS=""
+          if grep -q '^Checks passed:' "${RUNNER_TEMP}/build.log"; then
+            WARNINGS="$(awk '/^Checks passed:/ {exit} /^Lint warning:/ {p=1} p' \
+                        "${RUNNER_TEMP}/build.log")"
+          fi
+          if [ -n "${WARNINGS}" ]; then
+            {
+              echo "### Image lint warnings"
+              echo
+              echo "These do not fail the build. Each one describes something that"
+              echo "works in the image and misbehaves on the machine - most often a"
+              echo "directory in \`/var\`, which is reset on every deployment unless"
+              echo "a \`tmpfiles.d\` rule recreates it. See section 10 of build.sh."
+              echo
+              echo '```'
+              echo "${WARNINGS}"
+              echo '```'
+            } >> "${GITHUB_STEP_SUMMARY}"
+          fi
+
+          # Hand the values to the next steps.
+          {
+            echo "image_name=${IMAGE_NAME}"
+            echo "image_registry=${IMAGE_REGISTRY}"
+            echo "tags=${TAGS[*]}"
+          } >> "${GITHUB_OUTPUT}"
+
+          # build.sh installs packages with --skip-unavailable, so a name the
+          # repos no longer provide leaves the build green and the tool absent.
+          # It records those in the image; lift them onto the run page, where
+          # they are visible without opening a 3000-line log. This is the usual
+          # aftermath of a base-image bump: the new release renamed or dropped
+          # something, and this is the list to reconcile.
+          SKIPPED="$(podman run --rm "localhost/${IMAGE_NAME}:latest" \
+                     cat /usr/share/image-build/skipped-packages 2>/dev/null || true)"
+          if [ -n "${SKIPPED}" ]; then
+            {
+              echo "### Packages not installed"
+              echo
+              echo "The repos provide none of these, and \`--skip-unavailable\`"
+              echo "let the build continue without them:"
+              echo
+              echo '```'
+              echo "${SKIPPED}"
+              echo '```'
+            } >> "${GITHUB_STEP_SUMMARY}"
+          fi
+
+      # Everything below only runs for real builds of the repository's default
+      # branch, so pull requests can never publish or sign an image.
+      #
+      # The gate compares against the actual default branch at run time rather
+      # than naming it - a literal here would have to match whatever branch a
+      # repository created from this template happens to use, and getting it
+      # wrong fails silently: the image still builds, these steps report
+      # "skipped", nothing is pushed, and the first visible symptom is
+      # build-disk.yml failing with "403 Forbidden" while pulling an image
+      # that was never published. Scheduled runs always execute on the default
+      # branch but carry no repository object in their event payload, so they
+      # are let through explicitly. The same condition appears on all three
+      # steps below - keep them identical.
+      - name: Push to ghcr.io
+        id: push
+        if: >-
+          github.event_name != 'pull_request' &&
+          (github.event_name == 'schedule' ||
+           github.ref == format('refs/heads/{0}', github.event.repository.default_branch))
+        env:
+          # Provided automatically by GitHub; no secret to create.
+          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          podman login ghcr.io \
+            --username "${GITHUB_ACTOR}" \
+            --password "${REGISTRY_TOKEN}"
+
+          DEST="${{ steps.build.outputs.image_registry }}/${{ steps.build.outputs.image_name }}"
+          for tag in ${{ steps.build.outputs.tags }}; do
+            podman push --digestfile=digest.txt \
+              "localhost/${{ steps.build.outputs.image_name }}:${tag}" "${DEST}:${tag}"
+          done
+
+          # All tags point at the same digest, so the signing step signs it
+          # once. It needs the "sha256:..." form that an image@digest
+          # reference expects, which is not guaranteed by podman.
+          DIGEST="$(cat digest.txt)"
+          if [ -z "${DIGEST}" ]; then
+            echo "podman push wrote no digest" >&2
+            exit 1
+          fi
+          case "${DIGEST}" in
+            sha256:*) ;;
+            *) DIGEST="sha256:${DIGEST}" ;;
+          esac
+          echo "digest=${DIGEST}" >> "${GITHUB_OUTPUT}"
+
+      - name: Sign image
+        if: >-
+          github.event_name != 'pull_request' &&
+          (github.event_name == 'schedule' ||
+           github.ref == format('refs/heads/{0}', github.event.repository.default_branch))
+        env:
+          COSIGN_PRIVATE_KEY: ${{ secrets.SIGNING_SECRET }}
+          COSIGN_PASSWORD: ${{ secrets.SIGNING_SECRET_PASSWORD }}
+          # cosign authenticates separately from podman - see below.
+          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          # The secret is present and matches the committed public key - the
+          # "Check signing key" step above proved both before anything was
+          # built or pushed.
+          #
+          # The push step logged podman in, but podman keeps its credentials in
+          # ${XDG_RUNTIME_DIR}/containers/auth.json and cosign never looks there
+          # - it uses the Docker keychain (~/.docker/config.json). Without
+          # credentials of its own cosign reaches the registry anonymously and
+          # the signature upload is rejected with "UNAUTHORIZED: unauthenticated",
+          # even though the image itself pushed fine moments earlier. Passing
+          # them as flags keeps them scoped to this one command and writes no
+          # credential file to the runner.
+          IMAGE_DIGEST="${{ steps.build.outputs.image_registry }}/${{ steps.build.outputs.image_name }}@${{ steps.push.outputs.digest }}"
+
+          # --tlog-upload=false keeps the signature out of the public Rekor
+          # transparency log. Nothing in this chain reads it: verification on
+          # the machine is a policy.json sigstoreSigned rule against a key the
+          # image carries, and the verify below passes --insecure-ignore-tlog
+          # already. Uploading would publish the repository name and digest of
+          # every build to a public log for no gain - and for a private package
+          # that is a leak. Drop the flag if you do want the public record.
+          cosign sign -y \
+            --registry-username "${GITHUB_ACTOR}" \
+            --registry-password "${REGISTRY_TOKEN}" \
+            --key env://COSIGN_PRIVATE_KEY \
+            --tlog-upload=false \
+            "${IMAGE_DIGEST}"
+
+          # Verify what actually landed in the registry, with the public key
+          # the image carries. The pair was checked before the push; this
+          # proves the signature really uploaded and reads back - a repo
+          # key committed in one repository and a secret set in another are easy
+          # to get out of step - rotating one and forgetting the other produces
+          # images that sign fine here and are then rejected by every machine
+          # that tries to upgrade. Checking here turns that into a red build now
+          # instead of a stuck fleet later.
+          cosign verify \
+            --registry-username "${GITHUB_ACTOR}" \
+            --registry-password "${REGISTRY_TOKEN}" \
+            --key build_files/cosign.pub \
+            --insecure-ignore-tlog=true \
+            "${IMAGE_DIGEST}" > /dev/null
+          echo "Signature verifies against the committed cosign.pub."
+
+  # A nightly build publishes one new image version carrying three tags
+  # (latest, the date, and latest.<date> - all the same digest, so GHCR counts
+  # them as one version). Nothing ever removes the old ones, so the package
+  # page fills up with a version per day and several GB each. This keeps the
+  # most recent ones and deletes the rest.
+  #
+  # "latest" always rides the newest version, so keeping the newest N can never
+  # take it away - that, not the ignore-versions line, is what protects it.
+  # ignore-versions matches a package version's NAME, which for a container is
+  # its sha256 digest rather than any of its tags, so '^latest$' matches
+  # nothing; it is kept as a harmless second pair of braces, not relied on.
+  #
+  # To keep everything instead, delete this job. To keep more or less history,
+  # change min-versions-to-keep.
+  prune:
+    name: Prune old image versions
+    needs: build
+    # Same gate as the publish steps: nothing was pushed otherwise, so there is
+    # nothing this run should be pruning.
+    if: >-
+      github.event_name != 'pull_request' &&
+      (github.event_name == 'schedule' ||
+       github.ref == format('refs/heads/{0}', github.event.repository.default_branch))
+    runs-on: ubuntu-24.04
+    permissions:
+      packages: write   # deleting package versions needs write, not read
+
+    steps:
+      - name: Delete all but the most recent versions
+        uses: actions/delete-package-versions@v5
+        with:
+          package-name: ${{ needs.build.outputs.image_name }}
+          package-type: container
+          min-versions-to-keep: 30
+          ignore-versions: '^latest$'
