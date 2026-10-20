@@ -56,6 +56,10 @@ stands, and every default below is a plain, commented line in
   installed and `crond` enabled; anacron catches up jobs whose window was
   missed while the machine was off.
 - **`tuned` and `firewalld`** installed and enabled.
+- **Fingerprint login.** `fprintd` installed and started at boot, and
+  authselect's `with-fingerprint` feature on, so the login screen and `sudo`
+  accept an enrolled finger (`fprintd-enroll`). On a machine without a reader
+  nothing changes.
 - **Emacs with Donkey modal editing, the Ao theme and Garamond.** Every new
   user account starts with a ready-made XDG-native Emacs configuration
   ([Donkey](https://github.com/YardQuit/donkey) enabled,
@@ -248,11 +252,12 @@ and easy to slot in. Check a name first with `dnf info <package>`.
 Not everything the image installs is on that list. Anything a later section of
 `build.sh` needs *by name* - `tuned` and `firewalld` for the units section 8
 enables, `crontabs` and `cronie-anacron` for `crond`, `plymouth` for the splash
-screen - is installed in `build.sh` itself, next to the thing that needs it.
-Rewriting `rpm_packages` is expected; losing a service out of the image while
-doing it is not. Those installs are also not skippable, unlike the list itself:
-a name the repositories cannot provide stops the build where the package is
-named, rather than three sections later where a systemd unit is.
+screen, `fprintd` and `fprintd-pam` for fingerprint login - is installed in
+`build.sh` itself, next to the thing that needs it. Rewriting `rpm_packages` is
+expected; losing a service out of the image while doing it is not. Those
+installs are also not skippable, unlike the list itself: a name the
+repositories cannot provide stops the build where the package is named, rather
+than three sections later where a systemd unit is.
 
 A name the repos do not provide does not fail the build - `--skip-unavailable`
 is deliberate, because a new Fedora release renames, merges and drops packages,

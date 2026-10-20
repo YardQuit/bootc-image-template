@@ -850,6 +850,38 @@ systemctl enable bootc-fetch-apply-updates.timer
 ## firing alongside the daily one. Persistent=true catches up after the machine
 ## has been off over the scheduled time rather than skipping that day.
 
+## Fingerprint login, following Framework's Fedora guide
+## (framework.kustomer.help/fedora-fingerprint-troubleshooting-SyfIAyCM3).
+## Harmless on a machine with no reader: pam_fprintd finds no device and PAM
+## moves straight on to the password.
+##
+## fprintd ships as a static, D-Bus-activated unit with no [Install] section,
+## which is why the guide has you add "WantedBy=multi-user.target" to
+## /usr/lib/systemd/system/fprintd.service by hand. That file is read-only on an
+## installed bootc system and is replaced by every fprintd update, so
+## "systemctl add-wants" does the same thing from the outside: it writes the
+## multi-user.target.wants symlink in /etc without touching the vendor unit.
+##
+## authselect then adds pam_fprintd to system-auth, which is what makes the
+## login screen and sudo offer the reader. The check after it fails the build
+## if the feature did not stick, rather than shipping an image that silently
+## asks for a password only. Fingerprints themselves are per-machine data in
+## /var/lib/fprint - recreated on boot by fprintd's own tmpfiles.d rule, so
+## section 10 needs nothing - and are enrolled after installing, with
+## fprintd-enroll.
+##
+## Measured on cosmic-atomic:44, which ships both packages already, and on
+## fedora-bootc:44, which ships neither: both end with pam_fprintd.so in
+## /etc/pam.d/system-auth. Not measured on the CentOS, AlmaLinux or
+## Hummingbird bases - if one cannot provide fprintd, this pkg_install is
+## where its build stops.
+
+pkg_install fprintd fprintd-pam
+systemctl add-wants multi-user.target fprintd.service
+authselect enable-feature with-fingerprint
+authselect apply-changes
+authselect current | grep -qx -- '- with-fingerprint'
+
 ## One unit is masked rather than enabled. systemd-remount-fs.service reads
 ## /etc/fstab and remounts / with the options listed there - but on a bootc
 ## system / is composefs, an overlay mount, and the kernel refuses to remount

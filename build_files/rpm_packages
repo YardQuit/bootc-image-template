@@ -7,9 +7,10 @@
 #
 # Not every package the image installs is here, deliberately. Anything a later
 # section of build.sh needs by name - tuned and firewalld for the units it
-# enables, plymouth for the splash screen - is installed there instead, beside
-# the thing that needs it. Rewriting this list is expected; losing a service
-# out of the image while doing it is not, and that is what the split prevents.
+# enables, plymouth for the splash screen, fprintd for fingerprint login - is
+# installed there instead, beside the thing that needs it. Rewriting this list
+# is expected; losing a service out of the image while doing it is not, and
+# that is what the split prevents.
 
 bat
 btop
