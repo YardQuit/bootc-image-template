@@ -60,6 +60,11 @@ stands, and every default below is a plain, commented line in
   authselect's `with-fingerprint` feature on, so the login screen and `sudo`
   accept an enrolled finger (`fprintd-enroll`). On a machine without a reader
   nothing changes.
+- **No sleep with the lid closed while docked.** A logind drop-in
+  (`build_files/sysfiles/usr/lib/systemd/logind.conf.d/10-lid-docked.conf`)
+  ignores the lid when the laptop is docked or on mains power, and a GNOME
+  default stops idle suspend on mains power, so you can keep working on an
+  external screen. On battery, closing the lid still suspends.
 - **Emacs with Donkey modal editing, the Ao theme and Garamond.** Every new
   user account starts with a ready-made XDG-native Emacs configuration
   ([Donkey](https://github.com/YardQuit/donkey) enabled,

@@ -919,6 +919,32 @@ systemctl mask systemd-remount-fs.service
 # systemctl enable sshd.service
 # --------------------------------------------------------------------------
 
+## SSH keys only, no root. With the server enabled above, this stops root from
+## logging in over SSH at all and turns password and keyboard-interactive login
+## off, so the only way in is a key listed in the account's
+## ~/.ssh/authorized_keys. Put your public key there - ssh-copy-id from the
+## machine you connect from does it - before you build with this on, or the
+## machine cannot be reached over SSH. Logging in at the machine itself still
+## takes your password.
+##
+## The settings go in a drop-in under /etc/ssh/sshd_config.d/ rather than an
+## edit to sshd_config, so an openssh update never has to merge them. sshd uses
+## the first value it reads for each setting and reads the drop-ins in name
+## order, so the 10- prefix puts these ahead of the base's 50-redhat.conf. The
+## last lines ask sshd for the settings it would actually run with, using a
+## throwaway host key because the real ones are only made on first boot, and
+## fail the build if any of the three did not take.
+
+# --- SSH keys only, no root login: uncomment every line down to the next ruler
+# --------------------------------------------------------------------------
+# printf '%s\n' 'PermitRootLogin no' 'PasswordAuthentication no' 'KbdInteractiveAuthentication no' 'PubkeyAuthentication yes' > /etc/ssh/sshd_config.d/10-keys-only.conf
+# chmod 0600 /etc/ssh/sshd_config.d/10-keys-only.conf
+# SSH_TEST_KEY="$(mktemp -u)"
+# ssh-keygen -q -t ed25519 -N '' -f "${SSH_TEST_KEY}"
+# sshd -T -h "${SSH_TEST_KEY}" | grep -cxE 'permitrootlogin no|passwordauthentication no|kbdinteractiveauthentication no' | grep -qx 3
+# rm -f "${SSH_TEST_KEY}" "${SSH_TEST_KEY}.pub"
+# --------------------------------------------------------------------------
+
 # --- Tailscale: uncomment every line down to the next ruler
 # --------------------------------------------------------------------------
 # pkg_install tailscale
@@ -1065,6 +1091,33 @@ OVERRIDE
     GSETTINGS_BACKEND=memory gsettings get org.gnome.desktop.peripherals.touchpad tap-and-drag-lock | grep -qx true
 else
     echo "touchpad: no GNOME peripherals schema in this base - skipping tap-and-drag-lock"
+fi
+
+## Power: no automatic suspend on mains power for every account. A docked
+## laptop with the lid closed is idle as far as GNOME can tell whenever nobody
+## touches the keyboard, and the stock default suspends it after 15 minutes on
+## AC - the same interruption the logind lid setting in
+## build_files/sysfiles/usr/lib/systemd/logind.conf.d/10-lid-docked.conf
+## prevents. On battery GNOME still suspends when idle.
+##
+## This is the image-wide form of
+##
+##   gsettings set org.gnome.settings-daemon.plugins.power sleep-inactive-ac-type 'nothing'
+##
+## done the same way as the touchpad override above, and checked the same way.
+## The schema comes with gnome-settings-daemon, so the server and minimal bases
+## skip the block.
+
+if [ -f /usr/share/glib-2.0/schemas/org.gnome.settings-daemon.plugins.power.gschema.xml ]; then
+    cat > /usr/share/glib-2.0/schemas/zz-power.gschema.override <<'OVERRIDE'
+[org.gnome.settings-daemon.plugins.power]
+sleep-inactive-ac-type='nothing'
+OVERRIDE
+    chmod 0644 /usr/share/glib-2.0/schemas/zz-power.gschema.override
+    glib-compile-schemas /usr/share/glib-2.0/schemas
+    GSETTINGS_BACKEND=memory gsettings get org.gnome.settings-daemon.plugins.power sleep-inactive-ac-type | grep -qx "'nothing'"
+else
+    echo "power: no GNOME power schema in this base - skipping sleep-inactive-ac-type"
 fi
 
 
