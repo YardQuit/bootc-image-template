@@ -1027,6 +1027,46 @@ systemctl mask systemd-remount-fs.service
 # sed -i '/PAM-1.0/a\auth       required     pam_yubico.so mode=challenge-response' /etc/pam.d/sudo
 # --------------------------------------------------------------------------
 
+## Touchpad: tap-and-drag lock on for every account. With it, lifting the
+## finger in the middle of a tap-and-drag does not drop what is being dragged -
+## the drag carries on until the next tap - so a long drag can span several
+## swipes across the pad.
+##
+## This is the image-wide form of
+##
+##   gsettings set org.gnome.desktop.peripherals.touchpad tap-and-drag-lock true
+##
+## which only writes to the dconf database in one user's home, where the build
+## cannot reach. A gschema override changes the default instead: every account,
+## new or existing, starts with it on, and anyone can still switch it off in
+## their own session. The zz- prefix sorts it after the overrides the base
+## ships, so it wins any disagreement. glib-compile-schemas is what makes GNOME
+## see the file at all; it is run without --strict because the base's own
+## schemas already raise deprecation warnings that would abort it.
+##
+## Only where the schema exists. It comes with gsettings-desktop-schemas, which
+## the GNOME-based desktops ship and the server and minimal bases (fedora-bootc
+## and the rest) do not - there the block is skipped and the build carries on,
+## with nothing for a touchpad setting to apply to anyway.
+##
+## Where it does run, a misspelt key or one renamed in gsettings-desktop-schemas
+## is only a warning to glib-compile-schemas, and the setting would silently
+## stay off. The last line reads the default back through the in-memory backend
+## - no D-Bus or dconf needed during the build - and fails the build if it is
+## not "true".
+
+if [ -f /usr/share/glib-2.0/schemas/org.gnome.desktop.peripherals.gschema.xml ]; then
+    cat > /usr/share/glib-2.0/schemas/zz-touchpad.gschema.override <<'OVERRIDE'
+[org.gnome.desktop.peripherals.touchpad]
+tap-and-drag-lock=true
+OVERRIDE
+    chmod 0644 /usr/share/glib-2.0/schemas/zz-touchpad.gschema.override
+    glib-compile-schemas /usr/share/glib-2.0/schemas
+    GSETTINGS_BACKEND=memory gsettings get org.gnome.desktop.peripherals.touchpad tap-and-drag-lock | grep -qx true
+else
+    echo "touchpad: no GNOME peripherals schema in this base - skipping tap-and-drag-lock"
+fi
+
 
 #############################################################################
 ## 9a. Identify this image in /etc/os-release
