@@ -1565,3 +1565,33 @@ fi
 ## nothing.
 
 rm -rf /run/tuned
+
+
+#############################################################################
+## 12. Repositories where the ISO builder looks for them
+#############################################################################
+##
+## From Fedora 45 the fedora-repos package ships its .repo files in
+## /usr/share/dnf5/repos.d and leaves /etc/yum.repos.d empty. dnf reads both
+## directories, so nothing on the running system notices. bootc-image-builder
+## does: to work out the installer's packages for the ISO it reads the image's
+## /etc/yum.repos.d and nothing else, finds no repository there, and stops with
+##
+##   cannot depsolve: DNF error occurred: NoReposError: There was a problem
+##   finding repositories: There are no enabled repositories
+##
+## A link in /etc/yum.repos.d for each of those files puts them where the
+## builder looks. The links are relative so they resolve inside the image when
+## the builder reads it from outside, and each follows its file, so an update of
+## fedora-repos needs nothing from here. dnf takes a file name only once across
+## its directories, so it does not see any repository twice. A file already
+## present in /etc/yum.repos.d is left alone.
+##
+## On a Fedora 44 base the files are still in /etc/yum.repos.d, so this changes
+## nothing until the FROM line in the Containerfile moves to 45.
+
+for repo in /usr/share/dnf5/repos.d/*.repo; do
+    [ -e "${repo}" ] || continue
+    [ -e "/etc/yum.repos.d/${repo##*/}" ] && continue
+    ln -s "../../usr/share/dnf5/repos.d/${repo##*/}" /etc/yum.repos.d/
+done
